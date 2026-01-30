@@ -127,7 +127,7 @@ async def get_system_status(
             type="door" if hasattr(sensor, "is_opened") else "sensor",
             state=state_info.get("state"),
             state_duration_minutes=duration_min,
-            battery_percent=getattr(sensor, "battery_status", {}).get("percentage"),
+            battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
             is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
             last_updated=state_since,
         ))
@@ -182,7 +182,7 @@ async def get_sensors(
             type="door" if hasattr(sensor, "is_opened") else "sensor",
             state=state_info.get("state"),
             state_duration_minutes=duration_min,
-            battery_percent=getattr(sensor, "battery_status", {}).get("percentage"),
+            battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
             is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
             last_updated=state_since,
         ))
@@ -218,7 +218,7 @@ async def get_sensor(
         type="door" if hasattr(sensor, "is_opened") else "sensor",
         state=state_info.get("state"),
         state_duration_minutes=duration_min,
-        battery_percent=getattr(sensor, "battery_status", {}).get("percentage"),
+        battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
         is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
         last_updated=state_since,
     )
@@ -379,7 +379,7 @@ async def get_summary(
         if state_info.get("state") == "open":
             open_doors.append(sensor.name)
         
-        battery = getattr(sensor, "battery_status", {}).get("percentage")
+        battery = getattr(getattr(sensor, "battery_status", None), "percentage", None)
         if battery and battery < 20:
             low_battery.append(f"{sensor.name}: {battery}%")
         

@@ -90,7 +90,7 @@ async def list_sensors(request: Request):
             type="door" if hasattr(sensor, "is_opened") else "sensor",
             state=state_info.get("state"),
             state_since=state_info.get("since"),
-            battery_percent=getattr(sensor, "battery_status", {}).get("percentage"),
+            battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
             is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
         ))
     
@@ -114,7 +114,7 @@ async def get_sensor(sensor_id: str, request: Request):
         type="door" if hasattr(sensor, "is_opened") else "sensor",
         state=state_info.get("state"),
         state_since=state_info.get("since"),
-        battery_percent=getattr(sensor, "battery_status", {}).get("percentage"),
+        battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
         is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
     )
 

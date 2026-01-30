@@ -25,7 +25,6 @@ COPY --from=builder /root/.local /home/synthwarden/.local
 
 # Copy application
 COPY --chown=synthwarden:synthwarden src/ ./src/
-COPY --chown=synthwarden:synthwarden static/ ./static/ 2>/dev/null || true
 
 # Create data directory
 RUN mkdir -p /app/data && chown synthwarden:synthwarden /app/data
