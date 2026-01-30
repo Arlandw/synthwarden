@@ -1,0 +1,20 @@
+# SynthWarden Dependencies
+
+# Web framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Database
+sqlalchemy>=2.0.25
+aiosqlite>=0.19.0
+
+# UniFi Protect
+uiprotect>=6.0.0
+
+# HTTP client (for notifications)
+aiohttp>=3.9.0
+
+# Security
+cryptography>=41.0.0
