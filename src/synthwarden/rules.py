@@ -34,14 +34,99 @@ class RuleEngine:
         self._running = True
         logger.info("Rule engine started")
         
+        # Initialize state from current sensor values
+        await self._init_sensor_states()
+        
         while self._running:
             try:
+                # Poll sensor states (workaround for WebSocket issues)
+                await self._poll_sensor_states()
                 # Check duration-based rules
                 await self._check_duration_rules()
             except Exception as e:
                 logger.error(f"Rule engine error: {e}")
             
             await asyncio.sleep(10)  # Check every 10 seconds
+    
+    async def _init_sensor_states(self):
+        """Initialize state tracking from database, then sync with current values."""
+        now = datetime.now(timezone.utc)
+        
+        # Load persisted state from database
+        async with async_session() as session:
+            result = await session.execute(select(SensorState))
+            db_states = {s.sensor_id: s for s in result.scalars().all()}
+        
+        for sensor_id, sensor in self.unifi.get_sensors().items():
+            if hasattr(sensor, 'is_opened'):
+                current_state = "open" if sensor.is_opened else "closed"
+                db_state = db_states.get(sensor_id)
+                
+                if db_state and db_state.current_state == current_state:
+                    # State matches DB - use persisted timestamp
+                    self._sensor_states[sensor_id] = {
+                        "state": current_state,
+                        "since": db_state.state_since.replace(tzinfo=timezone.utc) if db_state.state_since else now,
+                        "name": sensor.name,
+                    }
+                    print(f"DEBUG: Restored {sensor.name}: {current_state} since {db_state.state_since}")
+                else:
+                    # State changed or new sensor - use current time
+                    self._sensor_states[sensor_id] = {
+                        "state": current_state,
+                        "since": now,
+                        "name": sensor.name,
+                    }
+                    # Persist to DB
+                    await self._persist_sensor_state(sensor_id, current_state, now)
+                    print(f"DEBUG: Initialized {sensor.name}: {current_state} (new)")
+    
+    async def _persist_sensor_state(self, sensor_id: str, state: str, since: datetime):
+        """Persist sensor state to database."""
+        async with async_session() as session:
+            # Upsert pattern
+            result = await session.execute(
+                select(SensorState).where(SensorState.sensor_id == sensor_id)
+            )
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                existing.current_state = state
+                existing.state_since = since
+                existing.alert_sent = False
+            else:
+                session.add(SensorState(
+                    sensor_id=sensor_id,
+                    current_state=state,
+                    state_since=since,
+                    alert_sent=False,
+                ))
+            await session.commit()
+    
+    async def _poll_sensor_states(self):
+        """Poll current sensor states and detect changes."""
+        now = datetime.now(timezone.utc)
+        # Refresh data from UniFi
+        await self.unifi._client.update()
+        
+        for sensor_id, sensor in self.unifi.get_sensors().items():
+            if hasattr(sensor, 'is_opened'):
+                new_state = "open" if sensor.is_opened else "closed"
+                current = self._sensor_states.get(sensor_id, {})
+                
+                if current.get("state") != new_state:
+                    # State changed
+                    print(f"DEBUG: Sensor {sensor.name} changed: {current.get('state')} → {new_state}")
+                    self._sensor_states[sensor_id] = {
+                        "state": new_state,
+                        "since": now,
+                        "name": sensor.name,
+                    }
+                    # Persist to database
+                    await self._persist_sensor_state(sensor_id, new_state, now)
+                    
+                    # Trigger state_change rules
+                    await self._process_state_change(sensor_id, sensor.name, new_state)
     
     def stop(self):
         """Stop the rule engine."""
@@ -115,6 +200,7 @@ class RuleEngine:
             for rule in rules:
                 sensor_state = self._sensor_states.get(rule.sensor_id)
                 if not sensor_state:
+                    print(f"DEBUG: No state for sensor {rule.sensor_id}")
                     continue
                 
                 trigger_config = json.loads(rule.trigger_config) if rule.trigger_config else {}
@@ -127,9 +213,11 @@ class RuleEngine:
                 
                 # Check duration
                 time_in_state = (now - sensor_state["since"]).total_seconds() / 60
+                print(f"DEBUG: {sensor_state['name']} is {sensor_state['state']} for {time_in_state:.1f} min (threshold: {duration_min})")
                 
                 if time_in_state >= duration_min:
                     if self._check_conditions(rule) and self._check_cooldown(rule):
+                        print(f"DEBUG: TRIGGERING ALERT for {sensor_state['name']}")
                         await self._trigger_alert(
                             rule,
                             sensor_state["name"],
