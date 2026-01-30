@@ -1,5 +1,6 @@
 """SynthWarden configuration."""
 
+from typing import Optional
 from pydantic_settings import BaseSettings
 from pathlib import Path
 
@@ -23,6 +24,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+    
+    # Clawdbot Integration
+    clawdbot_api_key: Optional[str] = None  # Optional API key for Clawdbot endpoints
     
     # Paths
     data_dir: Path = Path("data")

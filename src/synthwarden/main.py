@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
+from .clawdbot import router as clawdbot_router
 from .config import settings
 from .database import init_db
 from .unifi import UniFiClient
@@ -58,6 +59,7 @@ app.add_middleware(
 
 # API routes
 app.include_router(api_router, prefix="/api")
+app.include_router(clawdbot_router, prefix="/api")
 
 # Health check
 @app.get("/health")
