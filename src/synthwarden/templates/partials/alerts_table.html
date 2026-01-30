@@ -1,0 +1,47 @@
+{% if alerts %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Sensor</th>
+                <th>Event</th>
+                <th>Rule</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for alert in alerts %}
+            <tr class="alert-row {% if not alert.resolved_at %}unresolved{% endif %}">
+                <td>
+                    <span data-timestamp="{{ alert.triggered_at.isoformat() }}">
+                        {{ alert.triggered_at.strftime('%Y-%m-%d %H:%M') }}
+                    </span>
+                </td>
+                <td>{{ alert.sensor_name or alert.sensor_id[:8] }}</td>
+                <td>
+                    {% if alert.event_data %}
+                        {{ alert.event_data.get('state', 'triggered') }}
+                    {% else %}
+                        triggered
+                    {% endif %}
+                </td>
+                <td>{{ alert.rule_name or alert.rule_id[:8] }}</td>
+                <td>
+                    {% if alert.resolved_at %}
+                        <span class="badge badge-success">Resolved</span>
+                    {% else %}
+                        <span class="badge badge-warning">Active</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>No alerts recorded yet.</p>
+    <p>Alerts will appear here when your rules trigger.</p>
+</div>
+{% endif %}

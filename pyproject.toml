@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synthwarden"
+version = "0.1.0"
+description = "Smart notifications for UniFi Protect sensors"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Arland Whitfield"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "jinja2>=3.1.0",
+    "sqlalchemy>=2.0.25",
+    "aiosqlite>=0.19.0",
+    "uiprotect>=6.0.0",
+    "aiohttp>=3.9.0",
+    "cryptography>=41.0.0",
+    "python-multipart>=0.0.6",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+synthwarden = "synthwarden.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/arlandw/synthwarden"
+Documentation = "https://github.com/arlandw/synthwarden#readme"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+synthwarden = ["templates/**/*", "static/**/*"]

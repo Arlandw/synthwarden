@@ -78,6 +78,18 @@ class SensorState(Base):
     alert_sent = Column(Boolean, default=False)
 
 
+class Webhook(Base):
+    """Registered Clawdbot webhooks (persisted)."""
+    __tablename__ = "webhooks"
+    
+    id = Column(String, primary_key=True)
+    url = Column(String, nullable=False)
+    secret = Column(String, nullable=True)  # For HMAC signing
+    events = Column(Text)  # JSON array: ["alert", "state_change", "connection_lost"]
+    sensor_ids = Column(Text, nullable=True)  # JSON array or null for all
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # Async engine and session
 engine = create_async_engine(settings.database_url, echo=settings.debug)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

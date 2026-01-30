@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Alerts - SynthWarden{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">Alert History</h1>
+
+<div class="card">
+    {% if alerts %}
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Sensor</th>
+                <th>State</th>
+                <th>Rule</th>
+                <th>Delivered</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for alert in alerts %}
+            <tr>
+                <td>{{ alert.triggered_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td>{{ alert.sensor_name }}</td>
+                <td>{{ alert.state }}</td>
+                <td>{{ alert.rule_name or '-' }}</td>
+                <td>
+                    {% if alert.success %}
+                    <span style="color: var(--success);">✓ Yes</span>
+                    {% else %}
+                    <span style="color: var(--danger);">✗ Failed</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--text-muted); text-align: center; padding: 2rem;">No alerts recorded yet</p>
+    {% endif %}
+</div>
+{% endblock %}

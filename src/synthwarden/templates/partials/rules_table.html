@@ -1,0 +1,59 @@
+{% if rules %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Sensor</th>
+                <th>Trigger</th>
+                <th>Cooldown</th>
+                <th>Enabled</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rule in rules %}
+            <tr id="rule-{{ rule.id }}">
+                <td>{{ rule.name }}</td>
+                <td>{{ rule.sensor_name or rule.sensor_id[:8] }}</td>
+                <td>
+                    {% if rule.trigger_type == 'state_change' %}
+                        Any state change
+                    {% elif rule.trigger_type == 'state_to' %}
+                        When → {{ rule.trigger_config.get('target_state', '?') }}
+                    {% elif rule.trigger_type == 'duration' %}
+                        {{ rule.trigger_config.get('duration_state', 'open') }} > {{ rule.trigger_config.get('duration_minutes', '?') }}min
+                    {% else %}
+                        {{ rule.trigger_type }}
+                    {% endif %}
+                </td>
+                <td>{{ rule.cooldown_minutes }}min</td>
+                <td>
+                    <label class="toggle">
+                        <input type="checkbox" 
+                               {% if rule.enabled %}checked{% endif %}
+                               hx-patch="/ui/rules/{{ rule.id }}/toggle"
+                               hx-swap="none">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </td>
+                <td>
+                    <button class="btn btn-danger btn-sm" 
+                            hx-delete="/ui/rules/{{ rule.id }}"
+                            hx-target="#rules-table"
+                            hx-swap="innerHTML"
+                            hx-confirm="Delete this rule?">
+                        🗑️
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>No rules configured yet.</p>
+    <p>Click "New Rule" to create your first notification rule.</p>
+</div>
+{% endif %}

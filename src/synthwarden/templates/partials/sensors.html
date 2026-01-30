@@ -1,0 +1,52 @@
+{% if sensors %}
+    {% for sensor in sensors %}
+    <div class="sensor-card">
+        <div class="sensor-header">
+            <div>
+                <div class="sensor-name">{{ sensor.name }}</div>
+                <div class="sensor-type">{{ sensor.type }}</div>
+            </div>
+            {% if sensor.state %}
+                {% set state_class = 'state-' + sensor.state %}
+            {% else %}
+                {% set state_class = 'state-unknown' %}
+            {% endif %}
+            <span class="sensor-state {{ state_class }}">
+                {% if sensor.state == 'open' %}🚪 Open
+                {% elif sensor.state == 'closed' %}🔒 Closed
+                {% elif sensor.state == 'motion' %}👁️ Motion
+                {% elif sensor.state == 'clear' %}✓ Clear
+                {% else %}❓ Unknown
+                {% endif %}
+            </span>
+        </div>
+        <div class="sensor-meta">
+            {% if sensor.battery_percent is not none %}
+                {% if sensor.battery_percent < 20 %}
+                    <span class="battery-low">🔋 {{ sensor.battery_percent }}%</span>
+                {% elif sensor.battery_percent < 50 %}
+                    <span class="battery-medium">🔋 {{ sensor.battery_percent }}%</span>
+                {% else %}
+                    <span class="battery-good">🔋 {{ sensor.battery_percent }}%</span>
+                {% endif %}
+            {% endif %}
+            
+            {% if sensor.is_online %}
+                <span class="online">● Online</span>
+            {% else %}
+                <span class="offline">● Offline</span>
+            {% endif %}
+            
+            {% if sensor.state_since %}
+                <span data-timestamp="{{ sensor.state_since.isoformat() }}">
+                    {{ sensor.state_duration_minutes or 0 }}m
+                </span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty-state" style="grid-column: span 4;">
+        <p>No sensors found. Make sure SynthWarden is connected to UniFi Protect.</p>
+    </div>
+{% endif %}

@@ -1,0 +1,908 @@
+<!-- Sensor Detail Modal -->
+<div id="sensor-modal" class="modal" onclick="if(event.target === this) closeSensorModal()">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div class="sensor-modal-title">
+                <span id="modal-sensor-icon">🚪</span>
+                <h2 id="modal-sensor-name">Sensor Name</h2>
+            </div>
+            <button class="modal-close" onclick="closeSensorModal()">×</button>
+        </div>
+        
+        <div class="modal-body">
+            <!-- Sensor Status -->
+            <div class="sensor-status-section">
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">Status</span>
+                        <span id="modal-sensor-state" class="status-value state-closed">Closed</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Battery</span>
+                        <span id="modal-sensor-battery" class="status-value">95%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Type</span>
+                        <span id="modal-sensor-type" class="status-value">Door Sensor</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Model</span>
+                        <span id="modal-sensor-model" class="status-value">UFP-SENSE</span>
+                    </div>
+                </div>
+                
+                <!-- Environmental readings (shown for applicable sensors) -->
+                <div id="modal-env-section" class="env-readings" style="display: none;">
+                    <div class="status-item" id="modal-temp-item" style="display: none;">
+                        <span class="status-label">🌡️ Temperature</span>
+                        <span id="modal-sensor-temp" class="status-value">72°F</span>
+                    </div>
+                    <div class="status-item" id="modal-humidity-item" style="display: none;">
+                        <span class="status-label">💧 Humidity</span>
+                        <span id="modal-sensor-humidity" class="status-value">45%</span>
+                    </div>
+                    <div class="status-item" id="modal-light-item" style="display: none;">
+                        <span class="status-label">☀️ Light</span>
+                        <span id="modal-sensor-light" class="status-value">150 lux</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Activity Log Section -->
+            <div class="rules-section" style="margin-bottom: 1rem;">
+                <div class="section-header">
+                    <h3>📜 Activity Log</h3>
+                </div>
+                <div id="sensor-history-list" class="activity-log">
+                    <div class="loading-placeholder">Loading history...</div>
+                </div>
+            </div>
+
+            <!-- Rules Section -->
+            <div class="rules-section">
+                <div class="section-header">
+                    <h3>📋 Alert Rules</h3>
+                    <button class="btn btn-sm btn-primary" onclick="showAddRuleForm()">+ Add Rule</button>
+                </div>
+                
+                <div id="sensor-rules-list">
+                    <!-- Rules will be loaded here -->
+                    <div class="loading-placeholder">Loading rules...</div>
+                </div>
+                
+                <!-- Add/Edit Rule Form (hidden by default) -->
+                <div id="add-rule-form" class="add-rule-form" style="display: none;">
+                    <input type="hidden" id="edit-rule-id" value="">
+                    <h4 id="rule-form-title">New Alert Rule</h4>
+                    <form onsubmit="saveRule(event)">
+                        <input type="hidden" id="rule-sensor-id" value="">
+                        
+                        <div class="form-group">
+                            <label>Rule Name</label>
+                            <input type="text" id="rule-name" placeholder="e.g., Garage open too long" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Trigger Type</label>
+                            <select id="rule-trigger-type" onchange="updateTriggerConfig()">
+                                <option value="duration">State Duration (e.g., open > 10 min)</option>
+                                <option value="state_change">State Change (instant alert)</option>
+                                <option value="battery_low">Low Battery</option>
+                                <option value="temperature_high">Temperature High</option>
+                                <option value="temperature_low">Temperature Low</option>
+                                <option value="humidity_high">Humidity High</option>
+                                <option value="humidity_low">Humidity Low</option>
+                                <option value="offline">Sensor Offline</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Dynamic config based on trigger type -->
+                        <div id="trigger-config-fields">
+                            <!-- Duration config (default) -->
+                            <div class="form-group" id="state-config">
+                                <label>State</label>
+                                <select id="rule-state">
+                                    <option value="open">Open</option>
+                                    <option value="closed">Closed</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="duration-config" style="display: none;">
+                                <label>Duration (minutes)</label>
+                                <input type="number" id="rule-duration" value="10" min="1">
+                            </div>
+                            
+                            <!-- Threshold config (for battery/temp/humidity) -->
+                            <div class="form-group" id="threshold-config" style="display: none;">
+                                <label id="threshold-label">Threshold</label>
+                                <input type="number" id="rule-threshold" value="20">
+                                <span id="threshold-unit">%</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Cooldown (minutes)</label>
+                            <input type="number" id="rule-cooldown" value="30" min="1">
+                            <small>Minimum time between repeat alerts</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Send To</label>
+                            <select id="rule-channel" multiple style="min-height: 60px;">
+                                <!-- Channels loaded dynamically -->
+                            </select>
+                            <small>Hold Ctrl/Cmd to select multiple. <a href="/settings" target="_blank">Add channels in Settings</a></small>
+                        </div>
+                        
+                        <div class="form-row btn-row">
+                            <button type="button" class="btn btn-secondary" onclick="hideAddRuleForm()">Cancel</button>
+                            <button type="submit" class="btn btn-primary" id="rule-submit-btn">Save Rule</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="delete-confirm-modal" class="confirm-modal" onclick="if(event.target === this) hideDeleteConfirm()">
+    <div class="confirm-content">
+        <h3>Delete Rule?</h3>
+        <p>Are you sure you want to delete this rule? This cannot be undone.</p>
+        <div class="confirm-buttons">
+            <button class="btn btn-secondary" onclick="hideDeleteConfirm()">Cancel</button>
+            <button class="btn btn-danger" onclick="confirmDeleteRule()">Delete</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.confirm-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+}
+.confirm-modal.active {
+    display: flex;
+}
+.confirm-content {
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 400px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+.confirm-content h3 {
+    margin: 0 0 1rem 0;
+    color: var(--danger);
+}
+.confirm-content p {
+    margin: 0 0 1.5rem 0;
+    color: var(--text-muted);
+}
+.confirm-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+.modal.active {
+    display: flex;
+}
+.modal-content {
+    background: var(--bg-card);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 85vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.sensor-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.sensor-modal-title span {
+    font-size: 1.5rem;
+}
+.sensor-modal-title h2 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.5rem;
+    line-height: 1;
+}
+.modal-close:hover {
+    color: var(--text);
+}
+.modal-body {
+    padding: 1.5rem;
+}
+.sensor-status-section {
+    margin-bottom: 1.5rem;
+}
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+.status-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.status-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.status-value {
+    font-size: 1rem;
+    font-weight: 500;
+}
+.status-value.state-open {
+    color: var(--danger);
+}
+.status-value.state-closed {
+    color: var(--success);
+}
+.env-readings {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+}
+.rules-section {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 1rem;
+}
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.section-header h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+.rule-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.rule-info {
+    flex: 1;
+}
+.rule-name {
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+.rule-description {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+.rule-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.no-rules {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+.add-rule-form {
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+.add-rule-form h4 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+}
+.add-rule-form .form-group {
+    margin-bottom: 1rem;
+}
+.add-rule-form label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+.add-rule-form input,
+.add-rule-form select {
+    width: 100%;
+    padding: 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.875rem;
+}
+.add-rule-form small {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+.add-rule-form .form-row {
+    display: flex;
+    gap: 1rem;
+}
+.add-rule-form .form-row .form-group {
+    flex: 1;
+}
+.add-rule-form .btn-row {
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+.loading-placeholder {
+    text-align: center;
+    padding: 1rem;
+    color: var(--text-muted);
+}
+.activity-log {
+    max-height: 200px;
+    overflow-y: auto;
+}
+.activity-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+.activity-item:last-child {
+    border-bottom: none;
+}
+.activity-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+.activity-content {
+    flex: 1;
+}
+.activity-message {
+    color: var(--text);
+}
+.activity-time {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+.activity-state-open {
+    color: var(--danger);
+}
+.activity-state-closed {
+    color: var(--success);
+}
+.no-history {
+    text-align: center;
+    padding: 1rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+</style>
+
+<script>
+let currentSensorId = null;
+let currentSensorData = null;
+let availableChannels = [];
+
+// Load channels on page load
+async function loadChannels() {
+    try {
+        const response = await fetch('/api/channels');
+        availableChannels = await response.json();
+        updateChannelDropdown();
+    } catch (err) {
+        console.error('Error loading channels:', err);
+    }
+}
+
+function updateChannelDropdown(selectedIds = []) {
+    const select = document.getElementById('rule-channel');
+    if (!select) return;
+    
+    if (availableChannels.length === 0) {
+        select.innerHTML = '<option value="" disabled>No channels configured - add in Settings</option>';
+        return;
+    }
+    
+    select.innerHTML = availableChannels.map(ch => {
+        const icon = ch.type === 'discord' ? '💬' : ch.type === 'telegram' ? '📱' : '📧';
+        const selected = selectedIds.includes(ch.id) ? 'selected' : '';
+        return `<option value="${ch.id}" ${selected}>${icon} ${ch.name}</option>`;
+    }).join('');
+}
+
+// Load channels when page loads
+document.addEventListener('DOMContentLoaded', loadChannels);
+
+function openSensorModal(sensorId) {
+    currentSensorId = sensorId;
+    document.getElementById('sensor-modal').classList.add('active');
+    document.getElementById('rule-sensor-id').value = sensorId;
+    loadChannels();  // Refresh channels list each time modal opens
+    loadSensorDetails(sensorId);
+    loadSensorHistory(sensorId);
+    loadSensorRules(sensorId);
+}
+
+function closeSensorModal() {
+    document.getElementById('sensor-modal').classList.remove('active');
+    hideAddRuleForm();
+    currentSensorId = null;
+    currentSensorData = null;
+}
+
+async function loadSensorDetails(sensorId) {
+    try {
+        const response = await fetch(`/api/sensors/${sensorId}`);
+        const sensor = await response.json();
+        currentSensorData = sensor;
+        
+        // Update modal header
+        document.getElementById('modal-sensor-name').textContent = sensor.name;
+        document.getElementById('modal-sensor-icon').textContent = getSensorIcon(sensor.model, sensor.mount_type);
+        
+        // Update status
+        const stateEl = document.getElementById('modal-sensor-state');
+        stateEl.textContent = sensor.state || 'Unknown';
+        stateEl.className = 'status-value ' + (sensor.is_open ? 'state-open' : 'state-closed');
+        
+        document.getElementById('modal-sensor-battery').textContent = 
+            sensor.battery_percent ? `${sensor.battery_percent}%` : '-';
+        document.getElementById('modal-sensor-type').textContent = sensor.type;
+        document.getElementById('modal-sensor-model').textContent = sensor.model;
+        
+        // Environmental readings
+        const hasEnv = sensor.temperature_c !== null || sensor.humidity_pct !== null || sensor.light_lux !== null;
+        document.getElementById('modal-env-section').style.display = hasEnv ? 'grid' : 'none';
+        
+        if (sensor.temperature_c !== null) {
+            document.getElementById('modal-temp-item').style.display = 'flex';
+            const tempF = (sensor.temperature_c * 9/5) + 32;
+            document.getElementById('modal-sensor-temp').textContent = `${tempF.toFixed(0)}°F (${sensor.temperature_c.toFixed(1)}°C)`;
+        }
+        if (sensor.humidity_pct !== null) {
+            document.getElementById('modal-humidity-item').style.display = 'flex';
+            document.getElementById('modal-sensor-humidity').textContent = `${sensor.humidity_pct.toFixed(0)}%`;
+        }
+        if (sensor.light_lux !== null) {
+            document.getElementById('modal-light-item').style.display = 'flex';
+            document.getElementById('modal-sensor-light').textContent = `${sensor.light_lux.toFixed(0)} lux`;
+        }
+        
+        // Update available trigger types based on capabilities
+        updateAvailableTriggers(sensor.capabilities);
+        
+    } catch (err) {
+        console.error('Error loading sensor:', err);
+    }
+}
+
+async function loadSensorHistory(sensorId) {
+    const container = document.getElementById('sensor-history-list');
+    container.innerHTML = '<div class="loading-placeholder">Loading history...</div>';
+    
+    try {
+        const response = await fetch(`/api/sensors/${sensorId}/history?limit=20`);
+        const events = await response.json();
+        
+        if (events.length === 0) {
+            container.innerHTML = '<div class="no-history">No activity recorded yet</div>';
+            return;
+        }
+        
+        let html = '';
+        for (const event of events) {
+            const icon = getEventIcon(event.event_type, event.state);
+            const stateClass = event.state ? `activity-state-${event.state.split(' ')[0]}` : '';
+            const timeAgo = formatTimeAgo(new Date(event.timestamp));
+            
+            html += `
+                <div class="activity-item">
+                    <span class="activity-icon">${icon}</span>
+                    <div class="activity-content">
+                        <div class="activity-message ${stateClass}">${event.message}</div>
+                        <div class="activity-time">${timeAgo}</div>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+        
+    } catch (err) {
+        console.error('Error loading history:', err);
+        container.innerHTML = '<div class="no-history">Error loading history</div>';
+    }
+}
+
+function getEventIcon(eventType, state) {
+    if (eventType === 'alert') {
+        if (state && state.includes('open')) return '🚨';
+        if (state && state.includes('closed')) return '✅';
+        if (state && state.includes('battery')) return '🔋';
+        return '⚠️';
+    }
+    if (eventType === 'state_change') {
+        return state && state.includes('open') ? '🔓' : '🔒';
+    }
+    return '📝';
+}
+
+function formatTimeAgo(date) {
+    // Show actual timestamp: "Jan 30, 3:45 PM"
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + 
+           ', ' + 
+           date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+async function loadSensorRules(sensorId) {
+    const container = document.getElementById('sensor-rules-list');
+    container.innerHTML = '<div class="loading-placeholder">Loading rules...</div>';
+    
+    try {
+        const response = await fetch('/api/rules');
+        const allRules = await response.json();
+        const sensorRules = allRules.filter(r => r.sensor_id === sensorId);
+        
+        if (sensorRules.length === 0) {
+            container.innerHTML = '<div class="no-rules">No rules configured for this sensor.<br>Click "+ Add Rule" to create one.</div>';
+            return;
+        }
+        
+        let html = '';
+        for (const rule of sensorRules) {
+            const triggerDesc = formatTriggerDescription(rule);
+            html += `
+                <div class="rule-item" id="rule-${rule.id}">
+                    <div class="rule-info" onclick="editRule('${rule.id}')" style="cursor: pointer;">
+                        <div class="rule-name">${rule.name} <span style="font-size: 0.7rem; color: var(--text-muted);">✏️ click to edit</span></div>
+                        <div class="rule-description">${triggerDesc}</div>
+                    </div>
+                    <div class="rule-actions">
+                        <div class="toggle ${rule.enabled ? 'active' : ''}" 
+                             onclick="event.stopPropagation(); toggleRule('${rule.id}', this)"></div>
+                        <button class="btn btn-sm btn-danger" 
+                                onclick="event.stopPropagation(); showDeleteConfirm('${rule.id}')">Delete</button>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+        
+        // Store rules for editing
+        window.sensorRulesCache = sensorRules;
+        
+    } catch (err) {
+        console.error('Error loading rules:', err);
+        container.innerHTML = '<div class="no-rules">Error loading rules</div>';
+    }
+}
+
+function formatTriggerDescription(rule) {
+    const config = rule.trigger_config || {};
+    switch (rule.trigger_type) {
+        case 'duration':
+            return `Alert when ${config.state || 'open'} for more than ${config.duration_min || 10} minutes`;
+        case 'state_change':
+            return `Alert immediately when state changes to ${config.state || 'open'}`;
+        case 'battery_low':
+            return `Alert when battery drops below ${config.threshold || 20}%`;
+        case 'temperature_high':
+            return `Alert when temperature exceeds ${config.threshold || 80}°F`;
+        case 'temperature_low':
+            return `Alert when temperature drops below ${config.threshold || 50}°F`;
+        case 'humidity_high':
+            return `Alert when humidity exceeds ${config.threshold || 70}%`;
+        case 'humidity_low':
+            return `Alert when humidity drops below ${config.threshold || 30}%`;
+        case 'offline':
+            return 'Alert when sensor goes offline';
+        default:
+            return rule.trigger_type;
+    }
+}
+
+function getSensorIcon(model, mountType) {
+    if (model === 'USL-Environmental-US') return '🌡️';
+    if (mountType === 'garage') return '🚗';
+    if (mountType === 'window') return '🪟';
+    if (mountType === 'leak') return '💧';
+    return '🚪';
+}
+
+function updateAvailableTriggers(capabilities) {
+    const select = document.getElementById('rule-trigger-type');
+    // Reset options visibility - would need to implement based on capabilities
+    // For now, show all options
+}
+
+function showAddRuleForm() {
+    document.getElementById('edit-rule-id').value = '';
+    document.getElementById('rule-form-title').textContent = 'New Alert Rule';
+    document.getElementById('rule-submit-btn').textContent = 'Create Rule';
+    document.getElementById('add-rule-form').style.display = 'block';
+    // Reset form
+    document.getElementById('rule-name').value = '';
+    document.getElementById('rule-trigger-type').value = 'duration';
+    document.getElementById('rule-state').value = 'open';
+    document.getElementById('rule-duration').value = '10';
+    document.getElementById('rule-cooldown').value = '30';
+    updateChannelDropdown([]);  // Reset channel selection
+    updateTriggerConfig();
+}
+
+function editRule(ruleId) {
+    const rules = window.sensorRulesCache || [];
+    const rule = rules.find(r => r.id === ruleId);
+    if (!rule) return;
+    
+    document.getElementById('edit-rule-id').value = ruleId;
+    document.getElementById('rule-form-title').textContent = 'Edit Alert Rule';
+    document.getElementById('rule-submit-btn').textContent = 'Save Changes';
+    document.getElementById('add-rule-form').style.display = 'block';
+    
+    // Pre-fill form
+    document.getElementById('rule-name').value = rule.name;
+    document.getElementById('rule-trigger-type').value = rule.trigger_type;
+    document.getElementById('rule-cooldown').value = rule.cooldown_minutes;
+    
+    // Pre-select channels from destinations
+    const selectedChannelIds = (rule.destinations || [])
+        .filter(d => d.channel_id)
+        .map(d => d.channel_id);
+    updateChannelDropdown(selectedChannelIds);
+    
+    updateTriggerConfig();
+    
+    // Fill trigger-specific config
+    const config = rule.trigger_config || {};
+    if (rule.trigger_type === 'duration' || rule.trigger_type === 'state_change') {
+        document.getElementById('rule-state').value = config.state || 'open';
+        if (config.duration_min) {
+            document.getElementById('rule-duration').value = config.duration_min;
+        }
+    } else if (['battery_low', 'temperature_high', 'temperature_low', 'humidity_high', 'humidity_low'].includes(rule.trigger_type)) {
+        let threshold = config.threshold || 20;
+        // Convert C to F for temperature
+        if (rule.trigger_type.includes('temperature')) {
+            threshold = Math.round((threshold * 9/5) + 32);
+        }
+        document.getElementById('rule-threshold').value = threshold;
+    }
+}
+
+function hideAddRuleForm() {
+    document.getElementById('add-rule-form').style.display = 'none';
+    document.getElementById('edit-rule-id').value = '';
+}
+
+function updateTriggerConfig() {
+    const triggerType = document.getElementById('rule-trigger-type').value;
+    const stateConfig = document.getElementById('state-config');
+    const durationConfig = document.getElementById('duration-config');
+    const thresholdConfig = document.getElementById('threshold-config');
+    
+    // Hide all configs first
+    stateConfig.style.display = 'none';
+    durationConfig.style.display = 'none';
+    thresholdConfig.style.display = 'none';
+    
+    switch (triggerType) {
+        case 'duration':
+            stateConfig.style.display = 'block';
+            durationConfig.style.display = 'block';
+            break;
+        case 'state_change':
+            stateConfig.style.display = 'block';
+            break;
+        case 'battery_low':
+            thresholdConfig.style.display = 'block';
+            document.getElementById('threshold-label').textContent = 'Battery Threshold';
+            document.getElementById('rule-threshold').value = '20';
+            document.getElementById('threshold-unit').textContent = '%';
+            break;
+        case 'temperature_high':
+            thresholdConfig.style.display = 'block';
+            document.getElementById('threshold-label').textContent = 'Temperature Threshold';
+            document.getElementById('rule-threshold').value = '85';
+            document.getElementById('threshold-unit').textContent = '°F';
+            break;
+        case 'temperature_low':
+            thresholdConfig.style.display = 'block';
+            document.getElementById('threshold-label').textContent = 'Temperature Threshold';
+            document.getElementById('rule-threshold').value = '50';
+            document.getElementById('threshold-unit').textContent = '°F';
+            break;
+        case 'humidity_high':
+            thresholdConfig.style.display = 'block';
+            document.getElementById('threshold-label').textContent = 'Humidity Threshold';
+            document.getElementById('rule-threshold').value = '70';
+            document.getElementById('threshold-unit').textContent = '%';
+            break;
+        case 'humidity_low':
+            thresholdConfig.style.display = 'block';
+            document.getElementById('threshold-label').textContent = 'Humidity Threshold';
+            document.getElementById('rule-threshold').value = '30';
+            document.getElementById('threshold-unit').textContent = '%';
+            break;
+        case 'offline':
+            // No config needed
+            break;
+    }
+}
+
+async function saveRule(event) {
+    event.preventDefault();
+    
+    const sensorId = document.getElementById('rule-sensor-id').value;
+    const editRuleId = document.getElementById('edit-rule-id').value;
+    const triggerType = document.getElementById('rule-trigger-type').value;
+    const isEdit = !!editRuleId;
+    
+    // Build trigger config
+    let triggerConfig = {};
+    if (triggerType === 'duration') {
+        triggerConfig = {
+            state: document.getElementById('rule-state').value,
+            duration_min: parseInt(document.getElementById('rule-duration').value)
+        };
+    } else if (triggerType === 'state_change') {
+        triggerConfig = {
+            state: document.getElementById('rule-state').value
+        };
+    } else if (['battery_low', 'temperature_high', 'temperature_low', 'humidity_high', 'humidity_low'].includes(triggerType)) {
+        let threshold = parseInt(document.getElementById('rule-threshold').value);
+        // Convert F to C for temperature
+        if (triggerType.includes('temperature')) {
+            threshold = (threshold - 32) * 5/9;
+        }
+        triggerConfig = { threshold: threshold };
+    }
+    
+    // Get selected channels
+    const channelSelect = document.getElementById('rule-channel');
+    const selectedChannels = Array.from(channelSelect.selectedOptions).map(opt => opt.value);
+    const destinations = selectedChannels.map(channelId => {
+        const channel = availableChannels.find(c => c.id === channelId);
+        return channel ? { type: channel.type, channel_id: channel.id, ...channel.config } : null;
+    }).filter(Boolean);
+    
+    const ruleData = {
+        name: document.getElementById('rule-name').value,
+        sensor_id: sensorId,
+        trigger_type: triggerType,
+        trigger_config: triggerConfig,
+        cooldown_minutes: parseInt(document.getElementById('rule-cooldown').value),
+        destinations: destinations,
+    };
+    
+    if (!isEdit) {
+        ruleData.enabled = true;
+    }
+    
+    try {
+        let response;
+        if (isEdit) {
+            // Update existing rule
+            response = await fetch(`/api/rules/${editRuleId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ruleData)
+            });
+        } else {
+            // Create new rule
+            response = await fetch('/api/rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ruleData)
+            });
+        }
+        
+        if (response.ok) {
+            hideAddRuleForm();
+            loadSensorRules(sensorId);
+        } else {
+            alert(`Error ${isEdit ? 'updating' : 'creating'} rule`);
+        }
+    } catch (err) {
+        console.error(`Error ${isEdit ? 'updating' : 'creating'} rule:`, err);
+        alert(`Error ${isEdit ? 'updating' : 'creating'} rule`);
+    }
+}
+
+async function toggleRule(ruleId, el) {
+    const isActive = el.classList.contains('active');
+    
+    try {
+        await fetch(`/api/rules/${ruleId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: !isActive })
+        });
+        el.classList.toggle('active');
+    } catch (err) {
+        console.error('Error toggling rule:', err);
+    }
+}
+
+let pendingDeleteRuleId = null;
+
+function showDeleteConfirm(ruleId) {
+    pendingDeleteRuleId = ruleId;
+    document.getElementById('delete-confirm-modal').classList.add('active');
+}
+
+function hideDeleteConfirm() {
+    pendingDeleteRuleId = null;
+    document.getElementById('delete-confirm-modal').classList.remove('active');
+}
+
+async function confirmDeleteRule() {
+    if (!pendingDeleteRuleId) return;
+    const ruleId = pendingDeleteRuleId;
+    hideDeleteConfirm();
+    
+    try {
+        await fetch(`/api/rules/${ruleId}`, { method: 'DELETE' });
+        document.getElementById(`rule-${ruleId}`).remove();
+        
+        // Check if no rules left
+        const container = document.getElementById('sensor-rules-list');
+        if (!container.querySelector('.rule-item')) {
+            container.innerHTML = '<div class="no-rules">No rules configured for this sensor.<br>Click "+ Add Rule" to create one.</div>';
+        }
+    } catch (err) {
+        console.error('Error deleting rule:', err);
+    }
+}
+</script>

@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .database import get_session, AlertLog, Sensor
+from .database import get_session, async_session, AlertLog, Sensor, Webhook
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -34,12 +34,20 @@ class SensorStatusResponse(BaseModel):
     """Sensor status for Clawdbot."""
     id: str
     name: str
-    type: str
+    model: str  # UFP-SENSE, USL-Entry-US, USL-Environmental-US
+    type: str  # Human-readable type
+    capabilities: list[str]
     state: Optional[str]
     state_duration_minutes: Optional[int]
     battery_percent: Optional[int]
     is_online: bool
     last_updated: Optional[datetime]
+    # Detailed values
+    is_open: Optional[bool] = None
+    temperature_c: Optional[float] = None
+    temperature_f: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    light_lux: Optional[float] = None
 
 
 class SystemStatusResponse(BaseModel):
@@ -78,8 +86,32 @@ class AlertPayload(BaseModel):
     rule_name: Optional[str]
 
 
-# === In-memory webhook storage (would be DB in production) ===
-_webhooks: dict[str, dict] = {}
+# === Webhook storage (persisted to database) ===
+# In-memory cache, synced with database
+_webhooks_cache: dict[str, dict] = {}
+_webhooks_loaded: bool = False
+
+
+async def _load_webhooks():
+    """Load webhooks from database into cache."""
+    global _webhooks_cache, _webhooks_loaded
+    if _webhooks_loaded:
+        return
+    
+    async with async_session() as session:
+        result = await session.execute(select(Webhook))
+        webhooks = result.scalars().all()
+        for w in webhooks:
+            _webhooks_cache[w.id] = {
+                "id": w.id,
+                "url": w.url,
+                "secret": w.secret,
+                "events": json.loads(w.events) if w.events else ["alert"],
+                "sensor_ids": json.loads(w.sensor_ids) if w.sensor_ids else None,
+                "created_at": w.created_at,
+            }
+        _webhooks_loaded = True
+        logger.info(f"Loaded {len(_webhooks_cache)} webhooks from database")
 
 
 # === Optional API Key Auth ===
@@ -163,6 +195,8 @@ async def get_sensors(
     _: bool = Depends(verify_api_key),
 ):
     """Get all sensor states."""
+    from .sensor_types import parse_sensor, get_sensor_type_display, format_sensor_summary
+    
     unifi = request.app.state.unifi
     rules_engine = request.app.state.rules
     now = datetime.now(timezone.utc)
@@ -171,20 +205,31 @@ async def get_sensors(
     for sensor_id, sensor in unifi.get_sensors().items():
         state_info = rules_engine._sensor_states.get(sensor_id, {})
         state_since = state_info.get("since")
+        parsed = parse_sensor(sensor)
         
         duration_min = None
         if state_since:
             duration_min = int((now - state_since).total_seconds() / 60)
         
+        temp_c = parsed.temperature.value if parsed.temperature else None
+        temp_f = (temp_c * 9/5) + 32 if temp_c is not None else None
+        
         sensors.append(SensorStatusResponse(
             id=sensor_id,
             name=sensor.name,
-            type="door" if hasattr(sensor, "is_opened") else "sensor",
-            state=state_info.get("state"),
+            model=parsed.model.value,
+            type=get_sensor_type_display(parsed.model, parsed.mount_type),
+            capabilities=[c.value for c in parsed.capabilities],
+            state=format_sensor_summary(parsed),
             state_duration_minutes=duration_min,
-            battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
-            is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
+            battery_percent=parsed.battery_percent,
+            is_online=parsed.is_online,
             last_updated=state_since,
+            is_open=parsed.is_open,
+            temperature_c=temp_c,
+            temperature_f=temp_f,
+            humidity_pct=parsed.humidity.value if parsed.humidity else None,
+            light_lux=parsed.light.value if parsed.light else None,
         ))
     
     return sensors
@@ -227,6 +272,7 @@ async def get_sensor(
 @router.post("/webhooks", response_model=WebhookResponse)
 async def register_webhook(
     webhook: WebhookRegistration,
+    session: AsyncSession = Depends(get_session),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -234,15 +280,31 @@ async def register_webhook(
     
     SynthWarden will POST AlertPayload to this URL when events occur.
     """
-    webhook_id = str(uuid.uuid4())
+    await _load_webhooks()
     
-    _webhooks[webhook_id] = {
+    webhook_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    
+    # Save to database
+    db_webhook = Webhook(
+        id=webhook_id,
+        url=webhook.url,
+        secret=webhook.secret,
+        events=json.dumps(webhook.events),
+        sensor_ids=json.dumps(webhook.sensor_ids) if webhook.sensor_ids else None,
+        created_at=now,
+    )
+    session.add(db_webhook)
+    await session.commit()
+    
+    # Update cache
+    _webhooks_cache[webhook_id] = {
         "id": webhook_id,
         "url": webhook.url,
         "secret": webhook.secret,
         "events": webhook.events,
         "sensor_ids": webhook.sensor_ids,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": now,
     }
     
     logger.info(f"Registered webhook {webhook_id} for {webhook.url}")
@@ -251,26 +313,42 @@ async def register_webhook(
         id=webhook_id,
         url=webhook.url,
         events=webhook.events,
-        created_at=_webhooks[webhook_id]["created_at"],
+        created_at=now,
     )
 
 
 @router.delete("/webhooks/{webhook_id}")
 async def unregister_webhook(
     webhook_id: str,
+    session: AsyncSession = Depends(get_session),
     _: bool = Depends(verify_api_key),
 ):
     """Unregister a webhook."""
-    if webhook_id not in _webhooks:
+    await _load_webhooks()
+    
+    if webhook_id not in _webhooks_cache:
         raise HTTPException(status_code=404, detail="Webhook not found")
     
-    del _webhooks[webhook_id]
+    # Delete from database
+    result = await session.execute(select(Webhook).where(Webhook.id == webhook_id))
+    db_webhook = result.scalar_one_or_none()
+    if db_webhook:
+        await session.delete(db_webhook)
+        await session.commit()
+    
+    # Remove from cache
+    del _webhooks_cache[webhook_id]
     return {"status": "deleted"}
 
 
 @router.get("/webhooks", response_model=list[WebhookResponse])
-async def list_webhooks(_: bool = Depends(verify_api_key)):
+async def list_webhooks(
+    session: AsyncSession = Depends(get_session),
+    _: bool = Depends(verify_api_key),
+):
     """List all registered webhooks."""
+    await _load_webhooks()
+    
     return [
         WebhookResponse(
             id=w["id"],
@@ -278,7 +356,7 @@ async def list_webhooks(_: bool = Depends(verify_api_key)):
             events=w["events"],
             created_at=w["created_at"],
         )
-        for w in _webhooks.values()
+        for w in _webhooks_cache.values()
     ]
 
 
@@ -297,6 +375,8 @@ async def dispatch_to_clawdbot(
     
     Called by the rules engine when an alert triggers.
     """
+    await _load_webhooks()
+    
     payload = AlertPayload(
         event=event,
         sensor_id=sensor_id,
@@ -307,7 +387,7 @@ async def dispatch_to_clawdbot(
         rule_name=rule_name,
     )
     
-    for webhook_id, webhook in _webhooks.items():
+    for webhook_id, webhook in _webhooks_cache.items():
         # Filter by event type
         if event not in webhook["events"]:
             continue

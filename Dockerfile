@@ -23,7 +23,7 @@ RUN useradd -m -u 1000 synthwarden
 # Copy dependencies from builder
 COPY --from=builder /root/.local /home/synthwarden/.local
 
-# Copy application
+# Copy application (including templates and static files)
 COPY --chown=synthwarden:synthwarden src/ ./src/
 
 # Create data directory

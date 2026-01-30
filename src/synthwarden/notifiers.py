@@ -1,4 +1,4 @@
-"""Notification dispatchers for Discord, Telegram, Email."""
+"""Notification dispatchers for Discord, Telegram, Email, Clawdbot."""
 
 import logging
 from datetime import datetime
@@ -25,6 +25,8 @@ async def send_notification(
         return await send_telegram(channel_config, rule_name, sensor_name, state)
     elif channel_type == "email":
         return await send_email(channel_config, rule_name, sensor_name, state)
+    elif channel_type == "clawdbot":
+        return await send_clawdbot(channel_config, rule_name, sensor_name, state)
     else:
         logger.warning(f"Unknown channel type: {channel_type}")
         return False
@@ -169,4 +171,52 @@ async def send_email(
         return True
     except Exception as e:
         logger.error(f"Email notification error: {e}")
+        return False
+
+
+async def send_clawdbot(
+    config: dict,
+    rule_name: str,
+    sensor_name: str,
+    state: str,
+) -> bool:
+    """Send notification via Clawdbot gateway to Discord/Telegram/etc."""
+    gateway_url = config.get("gateway_url", "").rstrip("/")
+    gateway_token = config.get("gateway_token", "")
+    target = config.get("target", "")  # e.g., "user:130447280661594112" or channel ID
+    
+    if not gateway_url or not target:
+        logger.error("Clawdbot gateway_url and target are required")
+        return False
+    
+    now = datetime.now().strftime("%I:%M %p")
+    
+    # Format message for Discord/chat
+    message = f"🚨 **SynthWarden Alert**\n\n**{sensor_name}** is {state}\n\n📍 Sensor: {sensor_name}\n🕐 Time: {now}\n📋 Rule: {rule_name}"
+    
+    # Clawdbot gateway message endpoint
+    url = f"{gateway_url}/api/message"
+    
+    payload = {
+        "action": "send",
+        "target": target,
+        "message": message,
+    }
+    
+    headers = {"Content-Type": "application/json"}
+    if gateway_token:
+        headers["Authorization"] = f"Bearer {gateway_token}"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status in (200, 201, 204):
+                    logger.info(f"Clawdbot notification sent: {sensor_name}")
+                    return True
+                else:
+                    body = await resp.text()
+                    logger.error(f"Clawdbot failed: {resp.status} - {body}")
+                    return False
+    except Exception as e:
+        logger.error(f"Clawdbot notification error: {e}")
         return False

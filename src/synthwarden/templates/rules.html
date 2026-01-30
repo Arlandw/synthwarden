@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Rules - SynthWarden{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+    <h1>Rules</h1>
+    <button class="btn btn-primary" onclick="document.getElementById('newRuleModal').style.display='flex'">
+        + New Rule
+    </button>
+</div>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Sensor</th>
+                <th>Trigger</th>
+                <th>Cooldown</th>
+                <th>Enabled</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="rules-table">
+            {% for rule in rules %}
+            <tr>
+                <td>{{ rule.name }}</td>
+                <td>{{ rule.sensor_name or rule.sensor_id[:8] }}</td>
+                <td>
+                    {% if rule.trigger_type == 'duration' %}
+                        {{ rule.trigger_config.state }} > {{ rule.trigger_config.duration_min }} min
+                    {% elif rule.trigger_type == 'battery_low' %}
+                        Battery < {{ rule.trigger_config.threshold or 20 }}%
+                    {% elif rule.trigger_type == 'offline' %}
+                        Sensor offline
+                    {% elif rule.trigger_type == 'state_change' %}
+                        {% if rule.trigger_config.state == 'any' %}Any state change{% else %}State → {{ rule.trigger_config.state }}{% endif %}
+                    {% else %}
+                        {{ rule.trigger_type }}
+                    {% endif %}
+                </td>
+                <td>{{ rule.cooldown_minutes }} min</td>
+                <td>
+                    <div class="toggle {{ 'active' if rule.enabled else '' }}"
+                         hx-patch="/api/ui/rules/{{ rule.id }}/toggle"
+                         hx-swap="outerHTML">
+                    </div>
+                </td>
+                <td>
+                    <button class="btn btn-danger btn-sm"
+                            hx-delete="/api/ui/rules/{{ rule.id }}"
+                            hx-confirm="Delete this rule?"
+                            hx-target="closest tr"
+                            hx-swap="outerHTML">
+                        Delete
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- New Rule Modal -->
+<div id="newRuleModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; z-index: 1000;">
+    <div class="card" style="width: 500px; max-width: 90vw;">
+        <h2>Create New Rule</h2>
+        <form hx-post="/api/ui/rules" hx-target="#rules-table" hx-swap="beforeend" 
+              hx-on::after-request="if(event.detail.successful) document.getElementById('newRuleModal').style.display='none'">
+            <div class="form-group">
+                <label>Rule Name</label>
+                <input type="text" name="name" required placeholder="e.g., Front Door Open Alert">
+            </div>
+            <div class="form-group">
+                <label>Sensor</label>
+                <select name="sensor_id" required>
+                    {% for sensor in sensors %}
+                    <option value="{{ sensor.id }}">{{ sensor.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Trigger Type</label>
+                <select name="trigger_type" id="triggerType" onchange="updateTriggerConfig()">
+                    <option value="duration">Duration (open too long)</option>
+                    <option value="state_change">State Change</option>
+                    <option value="battery_low">Low Battery</option>
+                    <option value="offline">Sensor Offline</option>
+                </select>
+            </div>
+            <div id="stateConfig" class="form-group">
+                <label>State</label>
+                <select name="state" id="stateSelect">
+                    <option value="open">Open</option>
+                    <option value="closed">Closed</option>
+                    <option value="any">Any Change</option>
+                </select>
+            </div>
+            <div id="durationConfig" class="form-group">
+                <label>Duration (minutes)</label>
+                <input type="number" name="duration_min" value="10" min="1">
+            </div>
+            <div id="batteryConfig" class="form-group" style="display: none;">
+                <label>Battery Threshold (%)</label>
+                <input type="number" name="threshold" value="20" min="1" max="100">
+            </div>
+            <div class="form-group">
+                <label>Cooldown (minutes)</label>
+                <input type="number" name="cooldown_minutes" value="30" min="1">
+            </div>
+            <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1.5rem;">
+                <button type="button" class="btn" onclick="document.getElementById('newRuleModal').style.display='none'" style="background: var(--bg-hover);">
+                    Cancel
+                </button>
+                <button type="submit" class="btn btn-primary">Create Rule</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function updateTriggerConfig() {
+    const type = document.getElementById('triggerType').value;
+    const needsState = type === 'duration' || type === 'state_change';
+    const stateSelect = document.getElementById('stateSelect');
+    const anyOption = stateSelect.querySelector('option[value="any"]');
+    
+    document.getElementById('stateConfig').style.display = needsState ? 'block' : 'none';
+    document.getElementById('durationConfig').style.display = type === 'duration' ? 'block' : 'none';
+    document.getElementById('batteryConfig').style.display = type === 'battery_low' ? 'block' : 'none';
+    
+    // "Any Change" only makes sense for state_change, not duration
+    if (anyOption) {
+        anyOption.style.display = type === 'state_change' ? 'block' : 'none';
+        // If switching away from state_change and "any" was selected, reset to "open"
+        if (type !== 'state_change' && stateSelect.value === 'any') {
+            stateSelect.value = 'open';
+        }
+    }
+}
+</script>
+{% endblock %}

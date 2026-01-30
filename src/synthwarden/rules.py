@@ -9,7 +9,7 @@ import json
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .database import async_session, Rule, SensorState, AlertLog
+from .database import async_session, Rule, SensorState, AlertLog, Channel
 from .unifi import UniFiClient
 from .notifiers import send_notification
 from .clawdbot import dispatch_to_clawdbot
@@ -43,6 +43,10 @@ class RuleEngine:
                 await self._poll_sensor_states()
                 # Check duration-based rules
                 await self._check_duration_rules()
+                # Check battery levels
+                await self._check_battery_rules()
+                # Check offline sensors
+                await self._check_offline_rules()
             except Exception as e:
                 logger.error(f"Rule engine error: {e}")
             
@@ -152,16 +156,19 @@ class RuleEngine:
         """Process a sensor state change."""
         now = datetime.now(timezone.utc)
         
-        # Update state tracking
-        prev_state = self._sensor_states.get(sensor_id, {}).get("state")
+        # Check for actual state change BEFORE updating
+        current = self._sensor_states.get(sensor_id, {})
+        prev_state = current.get("state")
+        
+        if prev_state == new_state:
+            return  # No actual change - preserve existing timestamp
+        
+        # State actually changed - update with new timestamp
         self._sensor_states[sensor_id] = {
             "state": new_state,
             "since": now,
             "name": sensor_name,
         }
-        
-        if prev_state == new_state:
-            return  # No actual change
         
         logger.info(f"Sensor {sensor_name} changed: {prev_state} → {new_state}")
         
@@ -180,7 +187,8 @@ class RuleEngine:
                 trigger_config = json.loads(rule.trigger_config) if rule.trigger_config else {}
                 target_state = trigger_config.get("state")
                 
-                if target_state and new_state == target_state:
+                # "any" matches both open and closed
+                if target_state == "any" or (target_state and new_state == target_state):
                     if self._check_conditions(rule) and self._check_cooldown(rule):
                         await self._trigger_alert(rule, sensor_name, new_state, session)
     
@@ -222,6 +230,65 @@ class RuleEngine:
                             rule,
                             sensor_state["name"],
                             f"{target_state} for {int(time_in_state)} min",
+                            session,
+                        )
+    
+    async def _check_battery_rules(self):
+        """Check battery_low rules."""
+        async with async_session() as session:
+            result = await session.execute(
+                select(Rule).where(
+                    Rule.trigger_type == "battery_low",
+                    Rule.enabled == True,
+                )
+            )
+            rules = result.scalars().all()
+            
+            for rule in rules:
+                sensor = self.unifi.get_sensor(rule.sensor_id)
+                if not sensor:
+                    continue
+                
+                trigger_config = json.loads(rule.trigger_config) if rule.trigger_config else {}
+                threshold = trigger_config.get("threshold", 20)
+                
+                battery = getattr(getattr(sensor, "battery_status", None), "percentage", None)
+                if battery is None:
+                    continue
+                
+                if battery < threshold:
+                    if self._check_conditions(rule) and self._check_cooldown(rule):
+                        await self._trigger_alert(
+                            rule,
+                            sensor.name,
+                            f"low battery ({battery}%)",
+                            session,
+                        )
+    
+    async def _check_offline_rules(self):
+        """Check offline rules for disconnected sensors."""
+        async with async_session() as session:
+            result = await session.execute(
+                select(Rule).where(
+                    Rule.trigger_type == "offline",
+                    Rule.enabled == True,
+                )
+            )
+            rules = result.scalars().all()
+            
+            for rule in rules:
+                sensor = self.unifi.get_sensor(rule.sensor_id)
+                if not sensor:
+                    continue
+                
+                is_connected = sensor.is_connected if hasattr(sensor, "is_connected") else True
+                
+                if not is_connected:
+                    if self._check_conditions(rule) and self._check_cooldown(rule):
+                        await self._trigger_alert(
+                            rule,
+                            sensor.name,
+                            "offline",
                             session,
                         )
     
@@ -292,9 +359,21 @@ class RuleEngine:
         # Send notifications
         for dest in destinations:
             try:
+                # If destination has a channel_id, look up the channel config
+                channel_config = dest.copy()
+                if dest.get("channel_id"):
+                    result = await session.execute(
+                        select(Channel).where(Channel.id == dest["channel_id"])
+                    )
+                    channel = result.scalar_one_or_none()
+                    if channel and channel.config:
+                        # Merge channel config with destination
+                        stored_config = json.loads(channel.config) if isinstance(channel.config, str) else channel.config
+                        channel_config.update(stored_config)
+                
                 success = await send_notification(
                     channel_type=dest.get("type"),
-                    channel_config=dest,
+                    channel_config=channel_config,
                     rule_name=rule.name,
                     sensor_name=sensor_name,
                     state=state_desc,

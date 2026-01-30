@@ -20,11 +20,22 @@ router = APIRouter()
 class SensorResponse(BaseModel):
     id: str
     name: str
-    type: str
-    state: Optional[str]
+    model: str  # UFP-SENSE, USL-Entry-US, USL-Environmental-US
+    type: str  # Human-readable: "Garage Sensor", "Environmental", etc.
+    mount_type: str  # door, window, garage, wall, leak, none
+    capabilities: list[str]  # contact, motion, temperature, humidity, light, alarm, leak
+    state: Optional[str]  # Summary string
     state_since: Optional[datetime]
     battery_percent: Optional[int]
     is_online: bool
+    # Detailed values
+    is_open: Optional[bool] = None
+    is_motion: Optional[bool] = None
+    temperature_c: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    light_lux: Optional[float] = None
+    is_alarm: Optional[bool] = None
+    is_leak: Optional[bool] = None
 
 
 class RuleCreate(BaseModel):
@@ -78,20 +89,34 @@ class AlertResponse(BaseModel):
 @router.get("/sensors", response_model=list[SensorResponse])
 async def list_sensors(request: Request):
     """List all sensors from UniFi Protect."""
+    from .sensor_types import parse_sensor, get_sensor_type_display, format_sensor_summary
+    
     unifi = request.app.state.unifi
     rules_engine = request.app.state.rules
     
     sensors = []
     for sensor_id, sensor in unifi.get_sensors().items():
         state_info = rules_engine._sensor_states.get(sensor_id, {})
+        parsed = parse_sensor(sensor)
+        
         sensors.append(SensorResponse(
             id=sensor_id,
             name=sensor.name,
-            type="door" if hasattr(sensor, "is_opened") else "sensor",
-            state=state_info.get("state"),
+            model=parsed.model.value,
+            type=get_sensor_type_display(parsed.model, parsed.mount_type),
+            mount_type=parsed.mount_type.value,
+            capabilities=[c.value for c in parsed.capabilities],
+            state=format_sensor_summary(parsed),
             state_since=state_info.get("since"),
-            battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
-            is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
+            battery_percent=parsed.battery_percent,
+            is_online=parsed.is_online,
+            is_open=parsed.is_open,
+            is_motion=parsed.is_motion,
+            temperature_c=parsed.temperature.value if parsed.temperature else None,
+            humidity_pct=parsed.humidity.value if parsed.humidity else None,
+            light_lux=parsed.light.value if parsed.light else None,
+            is_alarm=parsed.is_alarm,
+            is_leak=parsed.is_leak,
         ))
     
     return sensors
@@ -100,6 +125,8 @@ async def list_sensors(request: Request):
 @router.get("/sensors/{sensor_id}", response_model=SensorResponse)
 async def get_sensor(sensor_id: str, request: Request):
     """Get a specific sensor."""
+    from .sensor_types import parse_sensor, get_sensor_type_display, format_sensor_summary
+    
     unifi = request.app.state.unifi
     sensor = unifi.get_sensor(sensor_id)
     
@@ -107,15 +134,26 @@ async def get_sensor(sensor_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Sensor not found")
     
     state_info = request.app.state.rules._sensor_states.get(sensor_id, {})
+    parsed = parse_sensor(sensor)
     
     return SensorResponse(
         id=sensor_id,
         name=sensor.name,
-        type="door" if hasattr(sensor, "is_opened") else "sensor",
-        state=state_info.get("state"),
+        model=parsed.model.value,
+        type=get_sensor_type_display(parsed.model, parsed.mount_type),
+        mount_type=parsed.mount_type.value,
+        capabilities=[c.value for c in parsed.capabilities],
+        state=format_sensor_summary(parsed),
         state_since=state_info.get("since"),
-        battery_percent=getattr(getattr(sensor, "battery_status", None), "percentage", None),
-        is_online=sensor.is_connected if hasattr(sensor, "is_connected") else True,
+        battery_percent=parsed.battery_percent,
+        is_online=parsed.is_online,
+        is_open=parsed.is_open,
+        is_motion=parsed.is_motion,
+        temperature_c=parsed.temperature.value if parsed.temperature else None,
+        humidity_pct=parsed.humidity.value if parsed.humidity else None,
+        light_lux=parsed.light.value if parsed.light else None,
+        is_alarm=parsed.is_alarm,
+        is_leak=parsed.is_leak,
     )
 
 
@@ -251,6 +289,21 @@ async def create_channel(channel: ChannelCreate, session: AsyncSession = Depends
     )
 
 
+@router.delete("/channels/{channel_id}")
+async def delete_channel(channel_id: str, session: AsyncSession = Depends(get_session)):
+    """Delete a notification channel."""
+    result = await session.execute(select(Channel).where(Channel.id == channel_id))
+    channel = result.scalar_one_or_none()
+    
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    
+    await session.delete(channel)
+    await session.commit()
+    
+    return {"success": True}
+
+
 @router.post("/channels/{channel_id}/test")
 async def test_channel(channel_id: str, session: AsyncSession = Depends(get_session)):
     """Send a test notification to a channel."""
@@ -274,6 +327,46 @@ async def test_channel(channel_id: str, session: AsyncSession = Depends(get_sess
     )
     
     return {"success": success}
+
+
+# === Sensor History ===
+
+class SensorHistoryEvent(BaseModel):
+    event_type: str  # "state_change", "alert", "battery_low", etc.
+    timestamp: datetime
+    state: Optional[str] = None
+    message: str
+    rule_name: Optional[str] = None
+
+
+@router.get("/sensors/{sensor_id}/history", response_model=list[SensorHistoryEvent])
+async def get_sensor_history(
+    sensor_id: str,
+    limit: int = 50,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get activity history for a specific sensor."""
+    # Get alerts for this sensor
+    result = await session.execute(
+        select(AlertLog)
+        .where(AlertLog.sensor_id == sensor_id)
+        .order_by(desc(AlertLog.triggered_at))
+        .limit(limit)
+    )
+    alerts = result.scalars().all()
+    
+    events = []
+    for alert in alerts:
+        event_data = json.loads(alert.event_data) if alert.event_data else {}
+        events.append(SensorHistoryEvent(
+            event_type="alert",
+            timestamp=alert.triggered_at,
+            state=event_data.get("state"),
+            message=f"{event_data.get('sensor_name', 'Sensor')} — {event_data.get('state', 'unknown')}",
+            rule_name=None,  # Would need to join with rules table
+        ))
+    
+    return events
 
 
 # === Alert History ===

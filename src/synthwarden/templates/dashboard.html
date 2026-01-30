@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - SynthWarden{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">Dashboard</h1>
+
+<div class="summary-bar">
+    <div class="summary-item">
+        <div class="summary-value">{{ sensors|length }}</div>
+        <div class="summary-label">Sensors</div>
+    </div>
+    <div class="summary-item">
+        <div class="summary-value" style="color: var(--success);">{{ sensors|selectattr('state', 'equalto', 'closed')|list|length }}</div>
+        <div class="summary-label">Closed</div>
+    </div>
+    <div class="summary-item">
+        <div class="summary-value" style="color: var(--danger);">{{ sensors|selectattr('state', 'equalto', 'open')|list|length }}</div>
+        <div class="summary-label">Open</div>
+    </div>
+    <div class="summary-item">
+        <div class="summary-value">{{ rules|length }}</div>
+        <div class="summary-label">Active Rules</div>
+    </div>
+    <div class="summary-item">
+        <div class="summary-value">{{ alerts_today }}</div>
+        <div class="summary-label">Alerts Today</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>📡 Sensors <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal;">(click to manage rules)</span></h2>
+    <div class="grid" id="sensors-grid" hx-get="/api/ui/sensors" hx-trigger="every 10s" hx-swap="innerHTML">
+        {% for sensor in sensors %}
+        <div class="sensor-card" onclick="openSensorModal('{{ sensor.id }}')" style="cursor: pointer;">
+            <div class="sensor-header">
+                <span class="sensor-name">
+                    <span class="status-dot {{ 'online' if sensor.is_online else 'offline' }}"></span>
+                    {{ sensor.name }}
+                </span>
+                <span class="sensor-state state-{{ sensor.state.split('|')[0].strip() if sensor.state else 'unknown' }}">
+                    {{ sensor.state.split('|')[0].strip() if sensor.state else 'Unknown' }}
+                </span>
+            </div>
+            <div class="sensor-meta">
+                {% if sensor.battery_percent %}
+                <span class="battery {% if sensor.battery_percent < 20 %}critical{% elif sensor.battery_percent < 40 %}low{% endif %}">
+                    🔋 {{ sensor.battery_percent }}%
+                </span>
+                {% endif %}
+                {% if sensor.state_duration_minutes is not none %}
+                <span>⏱️ {{ sensor.state_duration_minutes }} min</span>
+                {% endif %}
+            </div>
+            {% if sensor.temperature_c is not none or sensor.humidity_pct is not none %}
+            <div class="sensor-meta" style="margin-top: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.5rem;">
+                {% if sensor.temperature_c is not none %}
+                <span>🌡️ {{ ((sensor.temperature_c * 9/5) + 32)|round|int }}°F</span>
+                {% endif %}
+                {% if sensor.humidity_pct is not none %}
+                <span>💧 {{ sensor.humidity_pct|round|int }}%</span>
+                {% endif %}
+                {% if sensor.light_lux is not none %}
+                <span>☀️ {{ sensor.light_lux|round|int }} lux</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="card">
+    <h2>📋 Recent Alerts</h2>
+    {% if recent_alerts %}
+    {% for alert in recent_alerts[:5] %}
+    <div class="alert-item">
+        <strong>{{ alert.sensor_name }}</strong> — {{ alert.state }}
+        <div class="alert-time">{{ alert.triggered_at.strftime('%Y-%m-%d %H:%M') }}</div>
+    </div>
+    {% endfor %}
+    <a href="/alerts" style="color: var(--accent);">View all alerts →</a>
+    {% else %}
+    <p style="color: var(--text-muted);">No recent alerts</p>
+    {% endif %}
+</div>
+
+{% include "partials/sensor_modal.html" %}
+{% endblock %}

@@ -1,0 +1,606 @@
+{% extends "base.html" %}
+{% block title %}Settings - SynthWarden{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">⚙️ Settings</h1>
+
+<div class="grid" style="grid-template-columns: 1fr 1fr;">
+    <!-- UniFi Connection -->
+    <div class="card">
+        <h2>🔌 UniFi Protect Connection</h2>
+        <div id="connection-status" style="margin-bottom: 1rem;">
+            {% if connected %}
+            <span style="color: var(--success);">✓ Connected</span>
+            {% else %}
+            <span style="color: var(--danger);">✗ Disconnected</span>
+            {% endif %}
+        </div>
+        
+        <form id="unifi-form" hx-post="/api/settings/unifi" hx-target="#save-status" hx-swap="innerHTML">
+            <div class="form-group">
+                <label>Host</label>
+                <input type="text" name="host" value="{{ config.unifi.host }}" placeholder="192.168.1.1">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" name="username" value="{{ config.unifi.username }}">
+                </div>
+                <div class="form-group">
+                    <label>Port</label>
+                    <input type="number" name="port" value="{{ config.unifi.port }}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" placeholder="••••••••">
+                <small style="color: var(--text-muted);">Leave blank to keep existing</small>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <button type="submit" class="btn btn-primary">Save Connection</button>
+                <button type="button" class="btn" onclick="testConnection()">Test</button>
+                <span id="save-status"></span>
+            </div>
+        </form>
+    </div>
+
+    <!-- Preferences -->
+    <div class="card">
+        <h2>🎛️ Preferences</h2>
+        <form hx-post="/api/settings/preferences" hx-target="#pref-status" hx-swap="innerHTML">
+            <div class="form-group">
+                <label>Default Cooldown (minutes)</label>
+                <input type="number" name="default_cooldown_minutes" 
+                       value="{{ config.preferences.default_cooldown_minutes or 30 }}">
+            </div>
+            <div class="form-group">
+                <label>Web UI Port</label>
+                <input type="number" name="web_port" 
+                       value="{{ config.preferences.web_port or 8099 }}">
+                <small style="color: var(--text-muted);">Requires restart to take effect</small>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <button type="submit" class="btn btn-primary">Save Preferences</button>
+                <span id="pref-status"></span>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Notification Channels -->
+<div class="card" style="margin-top: 1rem;">
+    <h2>🔔 Notification Channels</h2>
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">
+        Configure where alerts should be sent.
+    </p>
+    
+    <div id="channels-list">
+        {% for channel in channels %}
+        <div class="channel-item" id="channel-{{ channel.id }}">
+            <div class="channel-info">
+                <span class="channel-icon">
+                    {% if channel.type == 'discord' %}💬{% elif channel.type == 'clawdbot' %}🤖{% elif channel.type == 'telegram' %}📱{% elif channel.type == 'email' %}📧{% else %}🔔{% endif %}
+                </span>
+                <span class="channel-name">{{ channel.name }}</span>
+                <span class="channel-type">({{ channel.type }})</span>
+            </div>
+            <div class="channel-actions">
+                <button class="btn btn-sm" onclick="testChannel('{{ channel.id }}')">Test</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteChannel('{{ channel.id }}')">Delete</button>
+            </div>
+        </div>
+        {% else %}
+        <div class="no-channels" style="text-align: center; padding: 1rem; color: var(--text-muted);">
+            No notification channels configured yet.
+        </div>
+        {% endfor %}
+    </div>
+    
+    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <h4 style="margin-bottom: 0.5rem;">Add Channel</h4>
+        <form id="add-channel-form" onsubmit="addChannel(event)">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="channel-name" placeholder="My Discord" required>
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="channel-type" onchange="updateChannelConfig()">
+                        <option value="discord">Discord Webhook</option>
+                        <option value="clawdbot">Clawdbot Gateway</option>
+                        <option value="telegram">Telegram Bot</option>
+                        <option value="email">Email (SMTP)</option>
+                    </select>
+                </div>
+            </div>
+            <div id="channel-config-fields">
+                <!-- Discord config (default) -->
+                <div class="form-group" id="discord-config">
+                    <label>Webhook URL</label>
+                    <input type="url" id="discord-webhook" placeholder="https://discord.com/api/webhooks/...">
+                </div>
+                <!-- Clawdbot config -->
+                <div id="clawdbot-channel-config" style="display: none;">
+                    <div class="form-group">
+                        <label>Gateway URL</label>
+                        <input type="url" id="clawdbot-gateway" placeholder="http://localhost:8080">
+                        <small style="color: var(--text-muted);">Your Clawdbot gateway address</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Target</label>
+                            <input type="text" id="clawdbot-target" placeholder="user:123456789 or channel ID">
+                            <small style="color: var(--text-muted);">Discord user/channel to send alerts</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Gateway Token (optional)</label>
+                            <input type="password" id="clawdbot-token" placeholder="Bearer token if required">
+                        </div>
+                    </div>
+                </div>
+                <!-- Telegram config -->
+                <div id="telegram-config" style="display: none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Bot Token</label>
+                            <input type="text" id="telegram-token" placeholder="123456:ABC-DEF...">
+                        </div>
+                        <div class="form-group">
+                            <label>Chat ID</label>
+                            <input type="text" id="telegram-chat" placeholder="-1001234567890">
+                        </div>
+                    </div>
+                </div>
+                <!-- Email config -->
+                <div id="email-config" style="display: none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>SMTP Host</label>
+                            <input type="text" id="smtp-host" placeholder="smtp.gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" id="smtp-port" value="587">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" id="smtp-user" placeholder="you@gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" id="smtp-pass">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Send To</label>
+                        <input type="email" id="smtp-to" placeholder="alerts@example.com">
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Channel</button>
+        </form>
+    </div>
+</div>
+
+<style>
+.channel-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--bg);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+.channel-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.channel-icon {
+    font-size: 1.25rem;
+}
+.channel-name {
+    font-weight: 500;
+}
+.channel-type {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+.channel-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+</style>
+
+<script>
+function updateChannelConfig() {
+    const type = document.getElementById('channel-type').value;
+    document.getElementById('discord-config').style.display = type === 'discord' ? 'block' : 'none';
+    document.getElementById('clawdbot-channel-config').style.display = type === 'clawdbot' ? 'block' : 'none';
+    document.getElementById('telegram-config').style.display = type === 'telegram' ? 'block' : 'none';
+    document.getElementById('email-config').style.display = type === 'email' ? 'block' : 'none';
+}
+
+async function addChannel(event) {
+    event.preventDefault();
+    const type = document.getElementById('channel-type').value;
+    const name = document.getElementById('channel-name').value;
+    
+    let config = {};
+    if (type === 'discord') {
+        config = { webhook_url: document.getElementById('discord-webhook').value };
+    } else if (type === 'clawdbot') {
+        config = {
+            gateway_url: document.getElementById('clawdbot-gateway').value,
+            target: document.getElementById('clawdbot-target').value,
+            gateway_token: document.getElementById('clawdbot-token').value
+        };
+    } else if (type === 'telegram') {
+        config = {
+            bot_token: document.getElementById('telegram-token').value,
+            chat_id: document.getElementById('telegram-chat').value
+        };
+    } else if (type === 'email') {
+        config = {
+            smtp_host: document.getElementById('smtp-host').value,
+            smtp_port: parseInt(document.getElementById('smtp-port').value),
+            smtp_user: document.getElementById('smtp-user').value,
+            smtp_pass: document.getElementById('smtp-pass').value,
+            to_address: document.getElementById('smtp-to').value
+        };
+    }
+    
+    const response = await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type, config })
+    });
+    
+    if (response.ok) {
+        location.reload();
+    } else {
+        showConfirm(null, null, 'Error', 'Failed to add channel. Check your configuration.');
+    }
+}
+
+async function testChannel(channelId) {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    
+    const response = await fetch(`/api/channels/${channelId}/test`, { method: 'POST' });
+    const result = await response.json();
+    
+    btn.disabled = false;
+    btn.textContent = result.success ? '✓ Sent!' : '✗ Failed';
+    setTimeout(() => btn.textContent = 'Test', 2000);
+}
+
+let pendingAction = null;
+let pendingActionArg = null;
+
+function showConfirm(action, arg, title, message) {
+    pendingAction = action;
+    pendingActionArg = arg;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    document.getElementById('settings-confirm-modal').classList.add('active');
+}
+
+function hideConfirm() {
+    pendingAction = null;
+    pendingActionArg = null;
+    document.getElementById('settings-confirm-modal').classList.remove('active');
+}
+
+async function executeConfirmedAction() {
+    const action = pendingAction;
+    const arg = pendingActionArg;
+    hideConfirm();
+    
+    if (action === 'deleteChannel') {
+        await fetch(`/api/channels/${arg}`, { method: 'DELETE' });
+        document.getElementById(`channel-${arg}`).remove();
+    } else if (action === 'deleteWebhook') {
+        await fetch(`/api/clawdbot/webhooks/${arg}`, { method: 'DELETE' });
+        document.getElementById(`webhook-${arg}`).remove();
+    } else if (action === 'resetConfig') {
+        await fetch('/api/settings/reset', { method: 'POST' });
+        window.location.href = '/api/setup';
+    }
+}
+
+function deleteChannel(channelId) {
+    showConfirm('deleteChannel', channelId, 'Delete Channel?', 'Are you sure you want to delete this notification channel?');
+}
+</script>
+
+<!-- Clawdbot Integration -->
+<div class="card" style="margin-top: 1rem;">
+    <h2>🤖 Clawdbot Integration</h2>
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">
+        Push alerts directly to your Clawdbot instance via webhook.
+    </p>
+    
+    <div id="clawdbot-webhooks">
+        <!-- Populated via JS -->
+    </div>
+    
+    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <h4 style="margin-bottom: 0.5rem;">Register Webhook</h4>
+        <form id="add-webhook-form" onsubmit="addClawdbotWebhook(event)">
+            <div class="form-group">
+                <label>Webhook URL</label>
+                <input type="url" id="webhook-url" placeholder="http://localhost:8098/webhook" required>
+                <small style="color: var(--text-muted);">Your Clawdbot webhook receiver endpoint</small>
+            </div>
+            <button type="submit" class="btn btn-primary">Register Webhook</button>
+        </form>
+    </div>
+</div>
+
+<script>
+async function loadClawdbotWebhooks() {
+    const response = await fetch('/api/clawdbot/webhooks');
+    const webhooks = await response.json();
+    
+    const container = document.getElementById('clawdbot-webhooks');
+    
+    if (webhooks.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 1rem; color: var(--text-muted);">No Clawdbot webhooks registered.</div>';
+        return;
+    }
+    
+    container.innerHTML = webhooks.map(w => `
+        <div class="channel-item" id="webhook-${w.id}">
+            <div class="channel-info" style="flex: 1;">
+                <span class="channel-icon">🤖</span>
+                <input type="text" id="webhook-url-${w.id}" value="${w.url}" style="flex: 1; min-width: 250px;">
+                <span class="channel-type">(${w.events.join(', ')})</span>
+            </div>
+            <div class="channel-actions">
+                <button class="btn btn-sm" onclick="updateClawdbotWebhook('${w.id}')">Save</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteClawdbotWebhook('${w.id}')">Delete</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function addClawdbotWebhook(event) {
+    event.preventDefault();
+    const btn = event.target.querySelector('button[type="submit"]');
+    const urlInput = document.getElementById('webhook-url');
+    const url = urlInput.value;
+    
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+    
+    try {
+        const response = await fetch('/api/clawdbot/webhooks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, events: ['alert'] })
+        });
+        
+        if (response.ok) {
+            urlInput.value = '';
+            btn.textContent = '✓ Added!';
+            loadClawdbotWebhooks();
+            setTimeout(() => { btn.textContent = 'Register Webhook'; btn.disabled = false; }, 1500);
+        } else {
+            const error = await response.json();
+            btn.textContent = '✗ Failed';
+            setTimeout(() => { btn.textContent = 'Register Webhook'; btn.disabled = false; }, 2000);
+        }
+    } catch (e) {
+        btn.textContent = '✗ Error';
+        setTimeout(() => { btn.textContent = 'Register Webhook'; btn.disabled = false; }, 2000);
+    }
+}
+
+async function updateClawdbotWebhook(webhookId) {
+    const urlInput = document.getElementById(`webhook-url-${webhookId}`);
+    const newUrl = urlInput.value;
+    
+    // Delete old and create new (API doesn't have update)
+    await fetch(`/api/clawdbot/webhooks/${webhookId}`, { method: 'DELETE' });
+    await fetch('/api/clawdbot/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: newUrl, events: ['alert'] })
+    });
+    
+    urlInput.style.borderColor = 'var(--success)';
+    setTimeout(() => { urlInput.style.borderColor = ''; loadClawdbotWebhooks(); }, 1000);
+}
+
+function deleteClawdbotWebhook(webhookId) {
+    showConfirm('deleteWebhook', webhookId, 'Delete Webhook?', 'Are you sure you want to delete this Clawdbot webhook?');
+}
+
+// Load webhooks on page load
+document.addEventListener('DOMContentLoaded', loadClawdbotWebhooks);
+</script>
+
+<!-- Sensor Nicknames -->
+<div class="card" style="margin-top: 1rem;">
+    <h2>📍 Sensor Names</h2>
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">
+        Customize display names for your sensors.
+    </p>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Current Name</th>
+                <th>Custom Name</th>
+                <th>Monitor</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="sensor-list">
+            {% for sensor in sensors %}
+            <tr>
+                <td>
+                    <span class="status-dot {% if sensor.is_online %}online{% else %}offline{% endif %}"></span>
+                    {{ sensor.original_name }}
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">
+                        ({{ sensor.id[:8] }}...)
+                    </span>
+                </td>
+                <td>
+                    <input type="text" 
+                           id="name-{{ sensor.id }}" 
+                           value="{{ sensor.display_name }}"
+                           style="width: 200px;">
+                </td>
+                <td>
+                    <div class="toggle {% if sensor.monitor %}active{% endif %}"
+                         onclick="toggleMonitor('{{ sensor.id }}', this)">
+                    </div>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-primary" 
+                            onclick="saveSensorName('{{ sensor.id }}')">
+                        Save
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Danger Zone -->
+<div class="card" style="margin-top: 1rem; border-color: var(--danger);">
+    <h2 style="color: var(--danger);">⚠️ Danger Zone</h2>
+    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+        <button class="btn btn-danger" onclick="showConfirm('resetConfig', null, 'Reset All Settings?', 'This will erase all configuration and return to setup. Are you sure?')">
+            Reset Configuration
+        </button>
+        <button class="btn" onclick="exportConfig()">
+            Export Config
+        </button>
+    </div>
+</div>
+
+<script>
+async function testConnection() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    
+    try {
+        const form = document.getElementById('unifi-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData);
+        data.port = parseInt(data.port);
+        data.verify_ssl = false;
+        
+        const response = await fetch('/api/setup/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        
+        const result = await response.json();
+        const status = document.getElementById('connection-status');
+        
+        if (result.success) {
+            status.innerHTML = `<span style="color: var(--success);">✓ Connected (${result.sensor_count} sensors)</span>`;
+        } else {
+            status.innerHTML = `<span style="color: var(--danger);">✗ ${result.error}</span>`;
+        }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Test';
+    }
+}
+
+async function saveSensorName(sensorId) {
+    const input = document.getElementById(`name-${sensorId}`);
+    const name = input.value;
+    
+    await fetch('/api/settings/sensor-name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sensor_id: sensorId, name: name }),
+    });
+    
+    // Visual feedback
+    input.style.borderColor = 'var(--success)';
+    setTimeout(() => input.style.borderColor = '', 1000);
+}
+
+async function toggleMonitor(sensorId, el) {
+    const isActive = el.classList.contains('active');
+    const newState = !isActive;
+    
+    await fetch('/api/settings/sensor-monitor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sensor_id: sensorId, monitor: newState }),
+    });
+    
+    el.classList.toggle('active');
+}
+
+function exportConfig() {
+    window.location.href = '/api/settings/export';
+}
+</script>
+
+<!-- Confirmation Modal -->
+<div id="settings-confirm-modal" class="confirm-modal" onclick="if(event.target === this) hideConfirm()">
+    <div class="confirm-content">
+        <h3 id="confirm-title">Confirm</h3>
+        <p id="confirm-message">Are you sure?</p>
+        <div class="confirm-buttons">
+            <button class="btn" onclick="hideConfirm()">Cancel</button>
+            <button class="btn btn-danger" onclick="executeConfirmedAction()">Confirm</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.confirm-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+}
+.confirm-modal.active {
+    display: flex;
+}
+.confirm-content {
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 400px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+.confirm-content h3 {
+    margin: 0 0 1rem 0;
+    color: var(--danger);
+}
+.confirm-content p {
+    margin: 0 0 1.5rem 0;
+    color: var(--text-muted);
+}
+.confirm-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+</style>
+{% endblock %}
