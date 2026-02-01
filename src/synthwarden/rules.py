@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .database import async_session, Rule, SensorState, AlertLog, Channel
 from .unifi import UniFiClient
 from .notifiers import send_notification
-from .clawdbot import dispatch_to_clawdbot
+from .openclaw import dispatch_to_openclaw
 
 logger = logging.getLogger(__name__)
 
@@ -394,8 +394,8 @@ class RuleEngine:
         session.add(alert)
         await session.commit()
         
-        # Push to registered Clawdbot webhooks
-        await dispatch_to_clawdbot(
+        # Push to registered OpenClaw webhooks
+        await dispatch_to_openclaw(
             event="alert",
             sensor_id=rule.sensor_id,
             sensor_name=sensor_name,

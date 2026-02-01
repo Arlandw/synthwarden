@@ -1,6 +1,6 @@
-"""Clawdbot Integration API.
+"""OpenClaw Integration API.
 
-Endpoints for Clawdbot instances to:
+Endpoints for OpenClaw instances to:
 1. Query sensor status
 2. Register for webhook notifications
 3. Get alert history
@@ -25,13 +25,13 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/clawdbot", tags=["clawdbot"])
+router = APIRouter(prefix="/openclaw", tags=["openclaw"])
 
 
 # === Models ===
 
 class SensorStatusResponse(BaseModel):
-    """Sensor status for Clawdbot."""
+    """Sensor status for OpenClaw."""
     id: str
     name: str
     model: str  # UFP-SENSE, USL-Entry-US, USL-Environmental-US
@@ -61,7 +61,7 @@ class SystemStatusResponse(BaseModel):
 
 
 class WebhookRegistration(BaseModel):
-    """Register a webhook for Clawdbot notifications."""
+    """Register a webhook for OpenClaw notifications."""
     url: str
     secret: Optional[str] = None  # For HMAC signing
     events: list[str] = ["alert"]  # alert, state_change, connection_lost
@@ -76,7 +76,7 @@ class WebhookResponse(BaseModel):
 
 
 class AlertPayload(BaseModel):
-    """Alert payload sent to Clawdbot webhooks."""
+    """Alert payload sent to OpenClaw webhooks."""
     event: str  # alert, state_change, connection_lost
     sensor_id: str
     sensor_name: str
@@ -118,8 +118,8 @@ async def _load_webhooks():
 
 async def verify_api_key(x_api_key: Optional[str] = Header(None)):
     """Verify API key if configured."""
-    if settings.clawdbot_api_key:
-        if not x_api_key or x_api_key != settings.clawdbot_api_key:
+    if settings.openclaw_api_key:
+        if not x_api_key or x_api_key != settings.openclaw_api_key:
             raise HTTPException(status_code=401, detail="Invalid API key")
     return True
 
@@ -133,10 +133,10 @@ async def get_system_status(
     _: bool = Depends(verify_api_key),
 ):
     """
-    Get full system status for Clawdbot.
+    Get full system status for OpenClaw.
     
     Returns sensor states, connection status, and recent alert info.
-    Clawdbot can poll this endpoint to show sensor status in its dashboard.
+    OpenClaw can poll this endpoint to show sensor status in its dashboard.
     """
     unifi = request.app.state.unifi
     rules_engine = request.app.state.rules
@@ -276,7 +276,7 @@ async def register_webhook(
     _: bool = Depends(verify_api_key),
 ):
     """
-    Register a webhook for Clawdbot to receive alerts.
+    Register a webhook for OpenClaw to receive alerts.
     
     SynthWarden will POST AlertPayload to this URL when events occur.
     """
@@ -362,7 +362,7 @@ async def list_webhooks(
 
 # === Webhook Dispatch (called by rules engine) ===
 
-async def dispatch_to_clawdbot(
+async def dispatch_to_openclaw(
     event: str,
     sensor_id: str,
     sensor_name: str,
@@ -371,7 +371,7 @@ async def dispatch_to_clawdbot(
     rule_name: Optional[str] = None,
 ):
     """
-    Send alert to all registered Clawdbot webhooks.
+    Send alert to all registered OpenClaw webhooks.
     
     Called by the rules engine when an alert triggers.
     """
@@ -427,7 +427,7 @@ async def dispatch_to_clawdbot(
             logger.error(f"Webhook {webhook_id} error: {e}")
 
 
-# === Summary endpoint for Clawdbot dashboard ===
+# === Summary endpoint for OpenClaw dashboard ===
 
 @router.get("/summary")
 async def get_summary(
@@ -435,7 +435,7 @@ async def get_summary(
     _: bool = Depends(verify_api_key),
 ):
     """
-    Get a quick summary string for Clawdbot dashboard.
+    Get a quick summary string for OpenClaw dashboard.
     
     Returns a formatted status line like:
     "🏠 4 sensors OK | 🚪 All doors closed | 🔋 Batteries: 95%+"

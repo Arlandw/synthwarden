@@ -1,18 +1,18 @@
-# Clawdbot Integration
+# OpenClaw Integration
 
-SynthWarden integrates directly with [Clawdbot](https://github.com/clawdbot/clawdbot) to send alerts through your AI assistant.
+SynthWarden integrates directly with [OpenClaw](https://github.com/openclaw/openclaw) to send alerts through your AI assistant.
 
 ## Setup
 
-### 1. Add Clawdbot Channel
+### 1. Add OpenClaw Channel
 
 In SynthWarden Settings → Notification Channels:
 
 1. Click **Add Channel**
-2. Select **Clawdbot Gateway** as the type
+2. Select **OpenClaw Gateway** as the type
 3. Fill in:
-   - **Name**: Descriptive name (e.g., "My Clawdbot")
-   - **Gateway URL**: Your Clawdbot gateway address
+   - **Name**: Descriptive name (e.g., "My OpenClaw")
+   - **Gateway URL**: Your OpenClaw gateway address
    - **Target**: Where to send alerts
    - **Token**: Gateway authentication token (if required)
 
@@ -31,7 +31,7 @@ The **Target** field accepts:
 Common configurations:
 
 ```
-# Local Clawdbot
+# Local OpenClaw
 http://localhost:8080
 
 # Docker (from another container)
@@ -44,17 +44,17 @@ http://192.168.1.100:8080
 ## How It Works
 
 ```
-Sensor Event → SynthWarden Rule → Clawdbot Gateway → Discord/Telegram
+Sensor Event → SynthWarden Rule → OpenClaw Gateway → Discord/Telegram
 ```
 
 1. UniFi Protect sensor triggers (door opens, battery low, etc.)
 2. SynthWarden evaluates rules and conditions
-3. If rule matches, SynthWarden POSTs to Clawdbot's `/api/message` endpoint
-4. Clawdbot delivers the alert to Discord/Telegram/etc.
+3. If rule matches, SynthWarden POSTs to OpenClaw's `/api/message` endpoint
+4. OpenClaw delivers the alert to Discord/Telegram/etc.
 
 ## Alert Format
 
-Alerts sent through Clawdbot look like:
+Alerts sent through OpenClaw look like:
 
 ```
 🚨 **SynthWarden Alert**
@@ -68,18 +68,18 @@ Alerts sent through Clawdbot look like:
 
 ## API Integration
 
-If you prefer programmatic integration, use the Clawdbot API endpoints:
+If you prefer programmatic integration, use the OpenClaw API endpoints:
 
 ### Get Sensor Status
 
 ```bash
-curl http://localhost:8099/api/clawdbot/sensors
+curl http://localhost:8099/api/openclaw/sensors
 ```
 
 ### Get Summary
 
 ```bash
-curl http://localhost:8099/api/clawdbot/summary
+curl http://localhost:8099/api/openclaw/summary
 ```
 
 Response:
@@ -98,7 +98,7 @@ Response:
 For custom integrations, register a webhook:
 
 ```bash
-curl -X POST http://localhost:8099/api/clawdbot/webhooks \
+curl -X POST http://localhost:8099/api/openclaw/webhooks \
   -H "Content-Type: application/json" \
   -d '{
     "url": "http://your-endpoint/webhook",
@@ -110,19 +110,19 @@ curl -X POST http://localhost:8099/api/clawdbot/webhooks \
 
 ### "Connection refused" errors
 
-- Ensure Clawdbot gateway is running
-- Check firewall allows connection between SynthWarden and Clawdbot
+- Ensure OpenClaw gateway is running
+- Check firewall allows connection between SynthWarden and OpenClaw
 - If using Docker, use `host.docker.internal` instead of `localhost`
 
 ### Alerts not delivering
 
 1. Test the channel in SynthWarden Settings
-2. Check Clawdbot logs for errors
+2. Check OpenClaw logs for errors
 3. Verify the target user/channel ID is correct
-4. Ensure Clawdbot has permissions to send to that target
+4. Ensure OpenClaw has permissions to send to that target
 
 ### Authentication errors
 
-If your Clawdbot requires authentication:
-1. Generate a gateway token in Clawdbot config
-2. Add the token to the Clawdbot channel in SynthWarden
+If your OpenClaw requires authentication:
+1. Generate a gateway token in OpenClaw config
+2. Add the token to the OpenClaw channel in SynthWarden

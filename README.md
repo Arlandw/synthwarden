@@ -17,7 +17,7 @@ SynthWarden is a self-hosted notification engine for UniFi Protect sensors. It c
 - 🚪 **Duration Alerts** — "Alert if door open > 10 minutes"
 - 🌙 **Time-Based Rules** — "Only notify between 10 PM and 6 AM"
 - 🌡️ **Temperature Thresholds** — "Alert if freezer goes above 32°F"
-- 🔔 **Multi-Channel** — Discord, Telegram, Email, Clawdbot
+- 🔔 **Multi-Channel** — Discord, Telegram, Email, OpenClaw
 - ⏰ **Cooldowns** — No more alert spam
 - 📊 **Alert History** — Review past notifications
 - 🏠 **100% Local** — No cloud, your data stays yours
@@ -45,15 +45,15 @@ Then open `http://localhost:8099` to configure your rules.
 - [Notification Channels](docs/notifications.md)
 - [API Reference](docs/api.md)
 
-## Clawdbot Integration
+## OpenClaw Integration
 
-SynthWarden integrates directly with [Clawdbot](https://github.com/clawdbot/clawdbot) to send alerts through your AI assistant. Add a **Clawdbot Gateway** channel in Settings and configure:
+SynthWarden integrates directly with [OpenClaw](https://github.com/openclaw/openclaw) to send alerts through your AI assistant. Add a **OpenClaw Gateway** channel in Settings and configure:
 
-- **Gateway URL** — Your Clawdbot gateway address (e.g., `http://localhost:8080`)
+- **Gateway URL** — Your OpenClaw gateway address (e.g., `http://localhost:8080`)
 - **Target** — Discord user (`user:123456789`) or channel ID
 - **Token** — Gateway token if authentication is required
 
-Alerts are sent directly through Clawdbot's message API, so your AI assistant can see and respond to sensor alerts.
+Alerts are sent directly through OpenClaw's message API, so your AI assistant can see and respond to sensor alerts.
 
 ## Why SynthWarden?
 

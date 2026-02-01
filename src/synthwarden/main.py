@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
-from .clawdbot import router as clawdbot_router
+from .openclaw import router as openclaw_router
 from .ui import router as ui_router
 from .setup_api import router as setup_router
 from .settings_api import router as settings_router
@@ -83,7 +83,7 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # API routes
 app.include_router(api_router, prefix="/api")
-app.include_router(clawdbot_router, prefix="/api")
+app.include_router(openclaw_router, prefix="/api")
 app.include_router(setup_router, prefix="/api")
 
 # UI routes (no prefix - serves at /, /rules, /alerts, /settings)
@@ -101,7 +101,7 @@ async def check_setup_required(request: Request, call_next):
     if (path.startswith("/api/setup") or 
         path.startswith("/static") or 
         path == "/health" or
-        path.startswith("/api/clawdbot")):  # Allow Clawdbot API even during setup
+        path.startswith("/api/openclaw")):  # Allow OpenClaw API even during setup
         return await call_next(request)
     
     # Check if setup is needed

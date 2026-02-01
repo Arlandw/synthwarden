@@ -78,7 +78,7 @@
         <div class="channel-item" id="channel-{{ channel.id }}">
             <div class="channel-info">
                 <span class="channel-icon">
-                    {% if channel.type == 'discord' %}💬{% elif channel.type == 'clawdbot' %}🤖{% elif channel.type == 'telegram' %}📱{% elif channel.type == 'email' %}📧{% else %}🔔{% endif %}
+                    {% if channel.type == 'discord' %}💬{% elif channel.type == 'openclaw' %}🤖{% elif channel.type == 'telegram' %}📱{% elif channel.type == 'email' %}📧{% else %}🔔{% endif %}
                 </span>
                 <span class="channel-name">{{ channel.name }}</span>
                 <span class="channel-type">({{ channel.type }})</span>
@@ -107,7 +107,7 @@
                     <label>Type</label>
                     <select id="channel-type" onchange="updateChannelConfig()">
                         <option value="discord">Discord Webhook</option>
-                        <option value="clawdbot">Clawdbot Gateway</option>
+                        <option value="openclaw">OpenClaw Gateway</option>
                         <option value="telegram">Telegram Bot</option>
                         <option value="email">Email (SMTP)</option>
                     </select>
@@ -119,22 +119,22 @@
                     <label>Webhook URL</label>
                     <input type="url" id="discord-webhook" placeholder="https://discord.com/api/webhooks/...">
                 </div>
-                <!-- Clawdbot config -->
-                <div id="clawdbot-channel-config" style="display: none;">
+                <!-- OpenClaw config -->
+                <div id="openclaw-channel-config" style="display: none;">
                     <div class="form-group">
                         <label>Gateway URL</label>
-                        <input type="url" id="clawdbot-gateway" placeholder="http://localhost:8080">
-                        <small style="color: var(--text-muted);">Your Clawdbot gateway address</small>
+                        <input type="url" id="openclaw-gateway" placeholder="http://localhost:8080">
+                        <small style="color: var(--text-muted);">Your OpenClaw gateway address</small>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Target</label>
-                            <input type="text" id="clawdbot-target" placeholder="user:123456789 or channel ID">
+                            <input type="text" id="openclaw-target" placeholder="user:123456789 or channel ID">
                             <small style="color: var(--text-muted);">Discord user/channel to send alerts</small>
                         </div>
                         <div class="form-group">
                             <label>Gateway Token (optional)</label>
-                            <input type="password" id="clawdbot-token" placeholder="Bearer token if required">
+                            <input type="password" id="openclaw-token" placeholder="Bearer token if required">
                         </div>
                     </div>
                 </div>
@@ -219,7 +219,7 @@
 function updateChannelConfig() {
     const type = document.getElementById('channel-type').value;
     document.getElementById('discord-config').style.display = type === 'discord' ? 'block' : 'none';
-    document.getElementById('clawdbot-channel-config').style.display = type === 'clawdbot' ? 'block' : 'none';
+    document.getElementById('openclaw-channel-config').style.display = type === 'openclaw' ? 'block' : 'none';
     document.getElementById('telegram-config').style.display = type === 'telegram' ? 'block' : 'none';
     document.getElementById('email-config').style.display = type === 'email' ? 'block' : 'none';
 }
@@ -232,11 +232,11 @@ async function addChannel(event) {
     let config = {};
     if (type === 'discord') {
         config = { webhook_url: document.getElementById('discord-webhook').value };
-    } else if (type === 'clawdbot') {
+    } else if (type === 'openclaw') {
         config = {
-            gateway_url: document.getElementById('clawdbot-gateway').value,
-            target: document.getElementById('clawdbot-target').value,
-            gateway_token: document.getElementById('clawdbot-token').value
+            gateway_url: document.getElementById('openclaw-gateway').value,
+            target: document.getElementById('openclaw-target').value,
+            gateway_token: document.getElementById('openclaw-token').value
         };
     } else if (type === 'telegram') {
         config = {
@@ -305,7 +305,7 @@ async function executeConfirmedAction() {
         await fetch(`/api/channels/${arg}`, { method: 'DELETE' });
         document.getElementById(`channel-${arg}`).remove();
     } else if (action === 'deleteWebhook') {
-        await fetch(`/api/clawdbot/webhooks/${arg}`, { method: 'DELETE' });
+        await fetch(`/api/openclaw/webhooks/${arg}`, { method: 'DELETE' });
         document.getElementById(`webhook-${arg}`).remove();
     } else if (action === 'resetConfig') {
         await fetch('/api/settings/reset', { method: 'POST' });
@@ -318,24 +318,24 @@ function deleteChannel(channelId) {
 }
 </script>
 
-<!-- Clawdbot Integration -->
+<!-- OpenClaw Integration -->
 <div class="card" style="margin-top: 1rem;">
-    <h2>🤖 Clawdbot Integration</h2>
+    <h2>🤖 OpenClaw Integration</h2>
     <p style="color: var(--text-muted); margin-bottom: 1rem;">
-        Push alerts directly to your Clawdbot instance via webhook.
+        Push alerts directly to your OpenClaw instance via webhook.
     </p>
     
-    <div id="clawdbot-webhooks">
+    <div id="openclaw-webhooks">
         <!-- Populated via JS -->
     </div>
     
     <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
         <h4 style="margin-bottom: 0.5rem;">Register Webhook</h4>
-        <form id="add-webhook-form" onsubmit="addClawdbotWebhook(event)">
+        <form id="add-webhook-form" onsubmit="addOpenClawWebhook(event)">
             <div class="form-group">
                 <label>Webhook URL</label>
                 <input type="url" id="webhook-url" placeholder="http://localhost:8098/webhook" required>
-                <small style="color: var(--text-muted);">Your Clawdbot webhook receiver endpoint</small>
+                <small style="color: var(--text-muted);">Your OpenClaw webhook receiver endpoint</small>
             </div>
             <button type="submit" class="btn btn-primary">Register Webhook</button>
         </form>
@@ -343,14 +343,14 @@ function deleteChannel(channelId) {
 </div>
 
 <script>
-async function loadClawdbotWebhooks() {
-    const response = await fetch('/api/clawdbot/webhooks');
+async function loadOpenClawWebhooks() {
+    const response = await fetch('/api/openclaw/webhooks');
     const webhooks = await response.json();
     
-    const container = document.getElementById('clawdbot-webhooks');
+    const container = document.getElementById('openclaw-webhooks');
     
     if (webhooks.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 1rem; color: var(--text-muted);">No Clawdbot webhooks registered.</div>';
+        container.innerHTML = '<div style="text-align: center; padding: 1rem; color: var(--text-muted);">No OpenClaw webhooks registered.</div>';
         return;
     }
     
@@ -362,14 +362,14 @@ async function loadClawdbotWebhooks() {
                 <span class="channel-type">(${w.events.join(', ')})</span>
             </div>
             <div class="channel-actions">
-                <button class="btn btn-sm" onclick="updateClawdbotWebhook('${w.id}')">Save</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteClawdbotWebhook('${w.id}')">Delete</button>
+                <button class="btn btn-sm" onclick="updateOpenClawWebhook('${w.id}')">Save</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteOpenClawWebhook('${w.id}')">Delete</button>
             </div>
         </div>
     `).join('');
 }
 
-async function addClawdbotWebhook(event) {
+async function addOpenClawWebhook(event) {
     event.preventDefault();
     const btn = event.target.querySelector('button[type="submit"]');
     const urlInput = document.getElementById('webhook-url');
@@ -379,7 +379,7 @@ async function addClawdbotWebhook(event) {
     btn.textContent = 'Adding...';
     
     try {
-        const response = await fetch('/api/clawdbot/webhooks', {
+        const response = await fetch('/api/openclaw/webhooks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, events: ['alert'] })
@@ -388,7 +388,7 @@ async function addClawdbotWebhook(event) {
         if (response.ok) {
             urlInput.value = '';
             btn.textContent = '✓ Added!';
-            loadClawdbotWebhooks();
+            loadOpenClawWebhooks();
             setTimeout(() => { btn.textContent = 'Register Webhook'; btn.disabled = false; }, 1500);
         } else {
             const error = await response.json();
@@ -401,28 +401,28 @@ async function addClawdbotWebhook(event) {
     }
 }
 
-async function updateClawdbotWebhook(webhookId) {
+async function updateOpenClawWebhook(webhookId) {
     const urlInput = document.getElementById(`webhook-url-${webhookId}`);
     const newUrl = urlInput.value;
     
     // Delete old and create new (API doesn't have update)
-    await fetch(`/api/clawdbot/webhooks/${webhookId}`, { method: 'DELETE' });
-    await fetch('/api/clawdbot/webhooks', {
+    await fetch(`/api/openclaw/webhooks/${webhookId}`, { method: 'DELETE' });
+    await fetch('/api/openclaw/webhooks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: newUrl, events: ['alert'] })
     });
     
     urlInput.style.borderColor = 'var(--success)';
-    setTimeout(() => { urlInput.style.borderColor = ''; loadClawdbotWebhooks(); }, 1000);
+    setTimeout(() => { urlInput.style.borderColor = ''; loadOpenClawWebhooks(); }, 1000);
 }
 
-function deleteClawdbotWebhook(webhookId) {
-    showConfirm('deleteWebhook', webhookId, 'Delete Webhook?', 'Are you sure you want to delete this Clawdbot webhook?');
+function deleteOpenClawWebhook(webhookId) {
+    showConfirm('deleteWebhook', webhookId, 'Delete Webhook?', 'Are you sure you want to delete this OpenClaw webhook?');
 }
 
 // Load webhooks on page load
-document.addEventListener('DOMContentLoaded', loadClawdbotWebhooks);
+document.addEventListener('DOMContentLoaded', loadOpenClawWebhooks);
 </script>
 
 <!-- Sensor Nicknames -->

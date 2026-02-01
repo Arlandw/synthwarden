@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
     
-    # Clawdbot Integration
-    clawdbot_api_key: Optional[str] = None  # Optional API key for Clawdbot endpoints
+    # OpenClaw Integration
+    openclaw_api_key: Optional[str] = None  # Optional API key for OpenClaw endpoints
     
     # Paths
     data_dir: Path = Path("data")
