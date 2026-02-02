@@ -3,11 +3,12 @@
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Set
 import json
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from .database import async_session, Rule, SensorState, AlertLog, Channel
 from .unifi import UniFiClient
@@ -23,8 +24,19 @@ class RuleEngine:
     def __init__(self, unifi: UniFiClient):
         self.unifi = unifi
         self._running = False
+        self._shutdown_event = asyncio.Event()  # For graceful shutdown
+        
+        # Shared state - protected by lock
         self._sensor_states: dict[str, dict] = {}
         self._cooldowns: dict[str, datetime] = {}
+        self._state_lock = asyncio.Lock()  # Protects _sensor_states and _cooldowns
+        
+        # Debounce: track recently processed events to avoid duplicates
+        self._recent_events: dict[str, datetime] = {}
+        self._debounce_seconds = 2.0  # Ignore duplicate events within this window
+        
+        # Track background tasks to avoid fire-and-forget
+        self._pending_tasks: Set[asyncio.Task] = set()
         
         # Register for UniFi events
         self.unifi.on_event(self._handle_event)
@@ -32,6 +44,7 @@ class RuleEngine:
     async def run(self):
         """Main rule engine loop."""
         self._running = True
+        self._shutdown_event.clear()
         logger.info("Rule engine started")
         
         # Initialize state from current sensor values
@@ -47,10 +60,36 @@ class RuleEngine:
                 await self._check_battery_rules()
                 # Check offline sensors
                 await self._check_offline_rules()
+                # Clean up completed tasks
+                self._cleanup_tasks()
+            except asyncio.CancelledError:
+                logger.info("Rule engine cancelled")
+                raise  # Re-raise to properly handle cancellation
             except Exception as e:
-                logger.error(f"Rule engine error: {e}")
+                logger.exception(f"Rule engine error: {e}")
             
-            await asyncio.sleep(10)  # Check every 10 seconds
+            # Wait with graceful shutdown support
+            try:
+                await asyncio.wait_for(
+                    self._shutdown_event.wait(),
+                    timeout=10.0
+                )
+                # If we get here, shutdown was requested
+                break
+            except asyncio.TimeoutError:
+                # Normal timeout, continue loop
+                pass
+        
+        logger.info("Rule engine stopped")
+    
+    def _cleanup_tasks(self):
+        """Remove completed tasks from tracking set."""
+        done = {t for t in self._pending_tasks if t.done()}
+        for task in done:
+            # Log any exceptions from fire-and-forget tasks
+            if task.exception():
+                logger.error(f"Background task failed: {task.exception()}")
+        self._pending_tasks -= done
     
     async def _init_sensor_states(self):
         """Initialize state tracking from database, then sync with current values."""
@@ -61,80 +100,109 @@ class RuleEngine:
             result = await session.execute(select(SensorState))
             db_states = {s.sensor_id: s for s in result.scalars().all()}
         
-        for sensor_id, sensor in self.unifi.get_sensors().items():
-            if hasattr(sensor, 'is_opened'):
-                current_state = "open" if sensor.is_opened else "closed"
-                db_state = db_states.get(sensor_id)
-                
-                if db_state and db_state.current_state == current_state:
-                    # State matches DB - use persisted timestamp
-                    self._sensor_states[sensor_id] = {
-                        "state": current_state,
-                        "since": db_state.state_since.replace(tzinfo=timezone.utc) if db_state.state_since else now,
-                        "name": sensor.name,
-                    }
-                    print(f"DEBUG: Restored {sensor.name}: {current_state} since {db_state.state_since}")
-                else:
-                    # State changed or new sensor - use current time
-                    self._sensor_states[sensor_id] = {
-                        "state": current_state,
-                        "since": now,
-                        "name": sensor.name,
-                    }
-                    # Persist to DB
-                    await self._persist_sensor_state(sensor_id, current_state, now)
-                    print(f"DEBUG: Initialized {sensor.name}: {current_state} (new)")
+        async with self._state_lock:
+            for sensor_id, sensor in self.unifi.get_sensors().items():
+                if hasattr(sensor, 'is_opened'):
+                    current_state = "open" if sensor.is_opened else "closed"
+                    db_state = db_states.get(sensor_id)
+                    
+                    if db_state and db_state.current_state == current_state:
+                        # State matches DB - use persisted timestamp
+                        self._sensor_states[sensor_id] = {
+                            "state": current_state,
+                            "since": db_state.state_since.replace(tzinfo=timezone.utc) if db_state.state_since else now,
+                            "name": sensor.name,
+                        }
+                        logger.debug(f"Restored {sensor.name}: {current_state} since {db_state.state_since}")
+                    else:
+                        # State changed or new sensor - use current time
+                        self._sensor_states[sensor_id] = {
+                            "state": current_state,
+                            "since": now,
+                            "name": sensor.name,
+                        }
+                        # Persist to DB
+                        await self._persist_sensor_state(sensor_id, current_state, now)
+                        logger.debug(f"Initialized {sensor.name}: {current_state} (new)")
     
     async def _persist_sensor_state(self, sensor_id: str, state: str, since: datetime):
-        """Persist sensor state to database."""
+        """Persist sensor state to database using atomic upsert."""
         async with async_session() as session:
-            # Upsert pattern
-            result = await session.execute(
-                select(SensorState).where(SensorState.sensor_id == sensor_id)
+            # Use SQLite's INSERT OR REPLACE for atomic upsert
+            stmt = sqlite_insert(SensorState).values(
+                sensor_id=sensor_id,
+                current_state=state,
+                state_since=since,
+                alert_sent=False,
             )
-            existing = result.scalar_one_or_none()
-            
-            if existing:
-                existing.current_state = state
-                existing.state_since = since
-                existing.alert_sent = False
-            else:
-                session.add(SensorState(
-                    sensor_id=sensor_id,
-                    current_state=state,
-                    state_since=since,
-                    alert_sent=False,
-                ))
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["sensor_id"],
+                set_={
+                    "current_state": state,
+                    "state_since": since,
+                    "alert_sent": False,
+                },
+            )
+            await session.execute(stmt)
             await session.commit()
     
     async def _poll_sensor_states(self):
         """Poll current sensor states and detect changes."""
         now = datetime.now(timezone.utc)
-        # Refresh data from UniFi
-        await self.unifi._client.update()
+        
+        # Refresh data from UniFi (run in thread if blocking)
+        try:
+            await asyncio.wait_for(self.unifi._client.update(), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("UniFi update timed out")
+            return
+        except Exception as e:
+            logger.error(f"UniFi update failed: {e}")
+            return
         
         for sensor_id, sensor in self.unifi.get_sensors().items():
             if hasattr(sensor, 'is_opened'):
                 new_state = "open" if sensor.is_opened else "closed"
-                current = self._sensor_states.get(sensor_id, {})
                 
-                if current.get("state") != new_state:
-                    # State changed
-                    print(f"DEBUG: Sensor {sensor.name} changed: {current.get('state')} → {new_state}")
-                    self._sensor_states[sensor_id] = {
-                        "state": new_state,
-                        "since": now,
-                        "name": sensor.name,
-                    }
-                    # Persist to database
-                    await self._persist_sensor_state(sensor_id, new_state, now)
+                async with self._state_lock:
+                    current = self._sensor_states.get(sensor_id, {})
                     
+                    if current.get("state") != new_state:
+                        # Check debounce - skip if recently processed
+                        if self._is_debounced(sensor_id):
+                            continue
+                        
+                        # State changed
+                        logger.debug(f"Sensor {sensor.name} changed: {current.get('state')} → {new_state}")
+                        self._sensor_states[sensor_id] = {
+                            "state": new_state,
+                            "since": now,
+                            "name": sensor.name,
+                        }
+                        self._recent_events[sensor_id] = now
+                
+                # Persist to database (outside lock to avoid holding it during I/O)
+                if current.get("state") != new_state and not self._is_debounced(sensor_id):
+                    await self._persist_sensor_state(sensor_id, new_state, now)
                     # Trigger state_change rules
                     await self._process_state_change(sensor_id, sensor.name, new_state)
     
+    def _is_debounced(self, sensor_id: str) -> bool:
+        """Check if sensor event should be debounced."""
+        last_event = self._recent_events.get(sensor_id)
+        if last_event:
+            elapsed = (datetime.now(timezone.utc) - last_event).total_seconds()
+            return elapsed < self._debounce_seconds
+        return False
+    
     def stop(self):
-        """Stop the rule engine."""
+        """Stop the rule engine gracefully."""
         self._running = False
+        self._shutdown_event.set()
+        
+        # Cancel any pending tasks
+        for task in self._pending_tasks:
+            task.cancel()
     
     def _handle_event(self, msg):
         """Handle real-time sensor events from WebSocket."""
@@ -143,34 +211,44 @@ class RuleEngine:
             if hasattr(msg, 'new_obj') and msg.new_obj:
                 obj = msg.new_obj
                 if hasattr(obj, 'is_opened'):
-                    # Door sensor state change
-                    asyncio.create_task(self._process_state_change(
-                        sensor_id=obj.id,
-                        sensor_name=obj.name,
-                        new_state="open" if obj.is_opened else "closed",
-                    ))
+                    # Create task and track it
+                    task = asyncio.create_task(
+                        self._handle_event_async(obj.id, obj.name, obj.is_opened)
+                    )
+                    self._pending_tasks.add(task)
+                    task.add_done_callback(lambda t: self._pending_tasks.discard(t))
         except Exception as e:
-            logger.error(f"Event handling error: {e}")
+            logger.exception(f"Event handling error: {e}")
+    
+    async def _handle_event_async(self, sensor_id: str, sensor_name: str, is_opened: bool):
+        """Async handler for WebSocket events."""
+        new_state = "open" if is_opened else "closed"
+        now = datetime.now(timezone.utc)
+        
+        async with self._state_lock:
+            # Check debounce
+            if self._is_debounced(sensor_id):
+                return
+            
+            current = self._sensor_states.get(sensor_id, {})
+            if current.get("state") == new_state:
+                return  # No actual change
+            
+            # Update state
+            self._sensor_states[sensor_id] = {
+                "state": new_state,
+                "since": now,
+                "name": sensor_name,
+            }
+            self._recent_events[sensor_id] = now
+        
+        # Process outside lock
+        await self._persist_sensor_state(sensor_id, new_state, now)
+        await self._process_state_change(sensor_id, sensor_name, new_state)
     
     async def _process_state_change(self, sensor_id: str, sensor_name: str, new_state: str):
         """Process a sensor state change."""
-        now = datetime.now(timezone.utc)
-        
-        # Check for actual state change BEFORE updating
-        current = self._sensor_states.get(sensor_id, {})
-        prev_state = current.get("state")
-        
-        if prev_state == new_state:
-            return  # No actual change - preserve existing timestamp
-        
-        # State actually changed - update with new timestamp
-        self._sensor_states[sensor_id] = {
-            "state": new_state,
-            "since": now,
-            "name": sensor_name,
-        }
-        
-        logger.info(f"Sensor {sensor_name} changed: {prev_state} → {new_state}")
+        logger.info(f"Sensor {sensor_name} changed to {new_state}")
         
         # Check immediate rules (state_change triggers)
         async with async_session() as session:
@@ -189,7 +267,7 @@ class RuleEngine:
                 
                 # "any" matches both open and closed
                 if target_state == "any" or (target_state and new_state == target_state):
-                    if self._check_conditions(rule) and self._check_cooldown(rule):
+                    if self._check_conditions(rule) and await self._check_cooldown(rule):
                         await self._trigger_alert(rule, sensor_name, new_state, session)
     
     async def _check_duration_rules(self):
@@ -206,10 +284,12 @@ class RuleEngine:
             rules = result.scalars().all()
             
             for rule in rules:
-                sensor_state = self._sensor_states.get(rule.sensor_id)
-                if not sensor_state:
-                    print(f"DEBUG: No state for sensor {rule.sensor_id}")
-                    continue
+                async with self._state_lock:
+                    sensor_state = self._sensor_states.get(rule.sensor_id)
+                    if not sensor_state:
+                        continue
+                    # Copy to avoid holding lock
+                    sensor_state = sensor_state.copy()
                 
                 trigger_config = json.loads(rule.trigger_config) if rule.trigger_config else {}
                 target_state = trigger_config.get("state", "open")
@@ -221,11 +301,11 @@ class RuleEngine:
                 
                 # Check duration
                 time_in_state = (now - sensor_state["since"]).total_seconds() / 60
-                print(f"DEBUG: {sensor_state['name']} is {sensor_state['state']} for {time_in_state:.1f} min (threshold: {duration_min})")
+                logger.debug(f"{sensor_state['name']} is {sensor_state['state']} for {time_in_state:.1f} min (threshold: {duration_min})")
                 
                 if time_in_state >= duration_min:
-                    if self._check_conditions(rule) and self._check_cooldown(rule):
-                        print(f"DEBUG: TRIGGERING ALERT for {sensor_state['name']}")
+                    if self._check_conditions(rule) and await self._check_cooldown(rule):
+                        logger.debug(f"TRIGGERING ALERT for {sensor_state['name']}")
                         await self._trigger_alert(
                             rule,
                             sensor_state["name"],
@@ -257,7 +337,7 @@ class RuleEngine:
                     continue
                 
                 if battery < threshold:
-                    if self._check_conditions(rule) and self._check_cooldown(rule):
+                    if self._check_conditions(rule) and await self._check_cooldown(rule):
                         await self._trigger_alert(
                             rule,
                             sensor.name,
@@ -284,7 +364,7 @@ class RuleEngine:
                 is_connected = sensor.is_connected if hasattr(sensor, "is_connected") else True
                 
                 if not is_connected:
-                    if self._check_conditions(rule) and self._check_cooldown(rule):
+                    if self._check_conditions(rule) and await self._check_cooldown(rule):
                         await self._trigger_alert(
                             rule,
                             sensor.name,
@@ -325,15 +405,17 @@ class RuleEngine:
         
         return True
     
-    def _check_cooldown(self, rule: Rule) -> bool:
-        """Check if rule is in cooldown period."""
+    async def _check_cooldown(self, rule: Rule) -> bool:
+        """Check if rule is in cooldown period (async for lock safety)."""
         now = datetime.now(timezone.utc)
-        last_triggered = self._cooldowns.get(rule.id)
         
-        if last_triggered:
-            cooldown = timedelta(minutes=rule.cooldown_minutes or 30)
-            if now - last_triggered < cooldown:
-                return False
+        async with self._state_lock:
+            last_triggered = self._cooldowns.get(rule.id)
+            
+            if last_triggered:
+                cooldown = timedelta(minutes=rule.cooldown_minutes or 30)
+                if now - last_triggered < cooldown:
+                    return False
         
         return True
     
@@ -350,7 +432,8 @@ class RuleEngine:
         logger.info(f"Triggering alert: {rule.name} - {sensor_name} {state_desc}")
         
         # Update cooldown
-        self._cooldowns[rule.id] = now
+        async with self._state_lock:
+            self._cooldowns[rule.id] = now
         
         # Parse destinations
         destinations = json.loads(rule.destinations) if rule.destinations else []
@@ -380,7 +463,7 @@ class RuleEngine:
                 )
                 results.append({"channel": dest.get("type"), "success": success})
             except Exception as e:
-                logger.error(f"Notification failed: {e}")
+                logger.exception(f"Notification failed: {e}")
                 results.append({"channel": dest.get("type"), "success": False, "error": str(e)})
         
         # Log alert

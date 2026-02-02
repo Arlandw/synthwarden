@@ -121,13 +121,38 @@ async def send_telegram(
         return False
 
 
+def _send_email_sync(
+    smtp_host: str,
+    smtp_port: int,
+    smtp_user: str,
+    smtp_pass: str,
+    to_address: str,
+    subject: str,
+    body: str,
+) -> bool:
+    """Synchronous email send - runs in thread pool."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_user
+    msg["To"] = to_address
+    msg.attach(MIMEText(body, "html"))
+    
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+    return True
+
+
 async def send_email(
     config: dict,
     rule_name: str,
     sensor_name: str,
     state: str,
 ) -> bool:
-    """Send email notification via SMTP."""
+    """Send email notification via SMTP (runs in thread pool to avoid blocking)."""
+    import asyncio
+    
     smtp_host = config.get("smtp_host")
     smtp_port = config.get("smtp_port", 587)
     smtp_user = config.get("smtp_user")
@@ -156,17 +181,18 @@ async def send_email(
     </html>
     """
     
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = smtp_user
-    msg["To"] = to_address
-    msg.attach(MIMEText(body, "html"))
-    
     try:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
+        # Run SMTP in thread pool to avoid blocking the event loop
+        await asyncio.to_thread(
+            _send_email_sync,
+            smtp_host,
+            smtp_port,
+            smtp_user,
+            smtp_pass,
+            to_address,
+            subject,
+            body,
+        )
         logger.info(f"Email notification sent: {sensor_name}")
         return True
     except Exception as e:
