@@ -10,6 +10,7 @@ services:
       - "8099:8000"
     volumes:
       - ./data:/app/data
+      - ./src:/app/src:ro  # Mount source for live updates
     environment:
       - TZ=${TZ:-America/Chicago}
     env_file:
